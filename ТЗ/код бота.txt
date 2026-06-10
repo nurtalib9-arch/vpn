@@ -1,0 +1,1791 @@
+ПОЛНЫЙ ИСХОДНЫЙ КОД 
+VPN Telegram Bot 
+Дата: 10.06.2026 
+СТРУКТУРА ПРОЕКТА 
+vpn-bot/ 
+├── docker-compose.yml 
+├── .env.example 
+├── Dockerfile 
+├── requirements.txt 
+├── alembic/ 
+│ ├── versions/ 
+│ └── env.py 
+├── app/ 
+│ ├── init.py 
+│ ├── main.py 
+│ ├── bot/ 
+│ │ ├── init.py 
+│ │ ├── handlers/ 
+│ │ │ ├── init.py 
+│ │ │ ├── start.py 
+│ │ │ ├── payments.py 
+│ │ │ ├── profile.py 
+│ │ │ ├── referral.py 
+│ │ │ └── gift.py 
+│ │ ├── keyboards/ 
+│ │ │ ├── init.py 
+│ │ │ └── main_menu.py 
+│ │ ├── states/ 
+│ │ │ ├── init.py 
+│ │ │ └── payment_states.py 
+│ │ ├── middlewares/ 
+│ │ │ ├── init.py 
+│ │ │ ├── logging_middleware.py 
+│ │ │ └── ban_middleware.py 
+│ │ └── services/ 
+│ │ ├── init.py 
+│ │ └── bot_service.py 
+│ ├── admin/ 
+│ │ ├── init.py 
+│ │ ├── app.py 
+│ │ ├── routes/ 
+│ │ │ ├── init.py 
+│ │ │ ├── dashboard.py 
+│ │ │ ├── users.py 
+│ │ │ ├── payments.py 
+│ │ │ └── servers.py 
+│ │ ├── templates/ 
+│ │ │ ├── base.html 
+│ │ │ ├── dashboard.html 
+│ │ │ ├── users.html 
+│ │ │ └── login.html 
+│ │ └── static/ 
+│ │ ├── css/ 
+│ │ └── js/ 
+│ ├── core/ 
+│ │ ├── init.py 
+│ │ ├── config.py 
+│ │ ├── database.py 
+│ │ └── redis.py 
+│ ├── models/ 
+│ │ ├── init.py 
+│ │ ├── user.py 
+│ │ ├── subscription.py 
+│ │ ├── payment.py 
+│ │ ├── tariff.py 
+│ │ ├── server.py 
+│ │ └── referral.py 
+│ ├── schemas/ 
+│ │ ├── init.py 
+│ │ ├── user.py 
+│ │ ├── subscription.py 
+│ │ └── payment.py 
+│ ├── services/ 
+│ │ ├── init.py 
+│ │ ├── user_service.py 
+│ │ ├── subscription_service.py 
+│ │ ├── payment_service.py 
+│ │ ├── notification_service.py 
+│ │ ├── marzban_service.py 
+│ │ └── scheduler_service.py 
+│ ├── utils/ 
+│ │ ├── init.py 
+│ │ ├── qr_generator.py 
+│ │ ├── helpers.py 
+│ │ └── validators.py 
+│ └── payments/ 
+│ ├── init.py 
+│ ├── yookassa.py 
+│ ├── cloudpayments.py 
+│ └── cryptobot.py 
+└── tests/ 
+└── init.py 
+ФАЙЛЫ КОНФИГУРАЦИИ 
+docker-compose.yml 
+version: '3.8' 
+services: 
+postgres: 
+image: postgres:15-alpine 
+container_name: vpn-bot-postgres 
+restart: always 
+environment: 
+POSTGRES_USER: ${POSTGRES_USER:-vpn_bot} 
+POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme} 
+POSTGRES_DB: ${POSTGRES_DB:-vpn_bot_db} 
+volumes: - postgres_data:/var/lib/postgresql/data 
+ports: - "127.0.0.1:5432:5432" 
+healthcheck: 
+test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-vpn_bot} -d 
+${POSTGRES_DB:-vpn_bot_db}"] 
+interval: 10s 
+timeout: 5s 
+retries: 5 
+redis: 
+image: redis:7-alpine 
+container_name: vpn-bot-redis 
+restart: always 
+volumes: - redis_data:/data 
+ports: - "127.0.0.1:6379:6379" 
+healthcheck: 
+test: ["CMD", "redis-cli", "ping"] 
+interval: 10s 
+timeout: 5s 
+retries: 5 
+bot: 
+build: . 
+container_name: vpn-bot-app 
+restart: always 
+env_file: - .env 
+depends_on: 
+postgres: 
+condition: service_healthy 
+redis: 
+condition: service_healthy 
+volumes: - ./app:/app/app - ./logs:/app/logs 
+command: python -m app.main 
+admin: 
+build: . 
+container_name: vpn-bot-admin 
+restart: always 
+env_file: - .env 
+depends_on: 
+postgres: 
+condition: service_healthy 
+redis: 
+condition: service_healthy 
+ports: - "127.0.0.1:8000:8000" 
+volumes: - ./app:/app/app 
+command: uvicorn app.main:admin_app --host 0.0.0.0 --port 8000 
+scheduler: 
+build: . 
+container_name: vpn-bot-scheduler 
+restart: always 
+env_file: - .env 
+depends_on: 
+postgres: 
+condition: service_healthy 
+redis: 
+condition: service_healthy 
+volumes: - ./app:/app/app 
+command: python -m app.scheduler 
+volumes: 
+postgres_data: 
+redis_data: 
+.env.example 
+Telegram 
+BOT_TOKEN=your_bot_token_here 
+ADMIN_IDS=123456789,987654321 
+Database 
+DATABASE_URL=postgresql+asyncpg://vpn_bot:changeme@postgres:5432/vpn_bot_db 
+Redis 
+REDIS_URL=redis://redis:6379/0 
+Marzban Panel 
+MARZBAN_URL=https://your-marzban-domain.com 
+MARZBAN_USERNAME=admin 
+MARZBAN_PASSWORD=admin 
+MARZBAN_INSECURE=false 
+Payments - YooKassa 
+YOOKASSA_SHOP_ID=your_shop_id 
+YOOKASSA_SECRET_KEY=your_secret_key 
+YOOKASSA_CALLBACK_URL=https://your-domain.com/webhook/yookassa 
+Payments - CloudPayments 
+CLOUDPAYMENTS_PUBLIC_ID=your_public_id 
+CLOUDPAYMENTS_API_SECRET=your_api_secret 
+CLOUDPAYMENTS_CALLBACK_URL=https://your-domain.com/webhook/cloudpayments 
+Payments - CryptoBot 
+CRYPTOBOT_TOKEN=your_cryptobot_token 
+CRYPTOBOT_CALLBACK_URL=https://your-domain.com/webhook/cryptobot 
+Admin Panel 
+ADMIN_USERNAME=admin 
+ADMIN_PASSWORD=strong_password_here 
+App Settings 
+DEBUG=false 
+LOG_LEVEL=INFO 
+WEBHOOK_URL=https://your-domain.com/webhook/telegram 
+Dockerfile 
+FROM python:3.11-slim 
+WORKDIR /app 
+RUN apt-get update && apt-get install -y --no-install-recommends 
+gcc 
+libpq-dev 
+&& rm -rf /var/lib/apt/lists/* 
+COPY requirements.txt . 
+RUN pip install --no-cache-dir -r requirements.txt 
+COPY . . 
+CMD ["python", "-m", "app.main"] 
+requirements.txt 
+aiogram==3.4.1 
+fastapi==0.109.0 
+uvicorn[standard]==0.27.0 
+sqlalchemy[asyncio]==2.0.25 
+asyncpg==0.29.0 
+alembic==1.13.1 
+redis==5.0.1 
+aioredis==2.0.1 
+apscheduler==3.10.4 
+yookassa==2.4.1 
+pydantic==2.5.3 
+pydantic-settings==2.1.0 
+python-dotenv==1.0.0 
+qrcode==7.4.2 
+pillow==10.2.0 
+httpx==0.26.0 
+aiohttp==3.9.1 
+jinja2==3.1.3 
+python-multipart==0.0.6 
+prometheus-client==0.19.0 
+ОСНОВНЫЕ МОДУЛИ 
+app/core/config.py 
+from pydantic_settings import BaseSettings 
+from typing import List, Optional 
+class Settings(BaseSettings): 
+BOT_TOKEN: str 
+ADMIN_IDS: List[int] 
+DATABASE_URL: str 
+REDIS_URL: str 
+MARZBAN_URL: str 
+MARZBAN_USERNAME: str 
+MARZBAN_PASSWORD: str 
+MARZBAN_INSECURE: bool = False 
+YOOKASSA_SHOP_ID: Optional[str] = None 
+YOOKASSA_SECRET_KEY: Optional[str] = None 
+YOOKASSA_CALLBACK_URL: Optional[str] = None 
+CLOUDPAYMENTS_PUBLIC_ID: Optional[str] = None 
+CLOUDPAYMENTS_API_SECRET: Optional[str] = None 
+CLOUDPAYMENTS_CALLBACK_URL: Optional[str] = None 
+CRYPTOBOT_TOKEN: Optional[str] = None 
+CRYPTOBOT_CALLBACK_URL: Optional[str] = None 
+ADMIN_USERNAME: str 
+ADMIN_PASSWORD: str 
+DEBUG: bool = False 
+LOG_LEVEL: str = "INFO" 
+WEBHOOK_URL: Optional[str] = None 
+class Config: 
+env_file = ".env" 
+case_sensitive = True 
+settings = Settings() 
+app/core/database.py 
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker 
+from sqlalchemy.orm import declarative_base 
+from app.core.config import settings 
+engine = create_async_engine( 
+settings.DATABASE_URL, 
+echo=settings.DEBUG, 
+pool_size=10, 
+max_overflow=20 
+) 
+async_session = async_sessionmaker( 
+engine, 
+class_=AsyncSession, 
+expire_on_commit=False 
+) 
+Base = declarative_base() 
+async def get_db(): 
+async with async_session() as session: 
+yield session 
+app/core/redis.py 
+import redis.asyncio as redis 
+from app.core.config import settings 
+redis_client = redis.from_url( 
+settings.REDIS_URL, 
+decode_responses=True 
+) 
+async def get_redis(): 
+return redis_client 
+МОДЕЛИ БАЗЫ ДАННЫХ 
+app/models/init.py 
+from app.models.user import User 
+from app.models.subscription import Subscription 
+from app.models.payment import Payment 
+from app.models.tariff import Tariff 
+from app.models.server import Server 
+from app.models.referral import Referral 
+all = ["User", "Subscription", "Payment", "Tariff", "Server", "Referral"] 
+app/models/user.py 
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, BigInteger, ForeignKey, 
+Text 
+from sqlalchemy.orm import relationship 
+from sqlalchemy.sql import func 
+from app.core.database import Base 
+class User(Base): 
+tablename = "users" 
+id = Column(Integer, primary_key=True, index=True) 
+telegram_id = Column(BigInteger, unique=True, index=True, 
+nullable=False) 
+username = Column(String(255), nullable=True) 
+first_name = Column(String(255), nullable=True) 
+last_name = Column(String(255), nullable=True) 
+referral_code = Column(String(50), unique=True, index=True, 
+nullable=False) 
+referred_by = Column(Integer, ForeignKey("users.id"), nullable=True) 
+created_at = Column(DateTime(timezone=True), 
+server_default=func.now()) 
+updated_at = Column(DateTime(timezone=True), onupdate=func.now()) 
+is_banned = Column(Boolean, default=False) 
+is_admin = Column(Boolean, default=False) 
+subscriptions = relationship("Subscription", back_populates="user", 
+lazy="selectin") 
+payments = relationship("Payment", back_populates="user", 
+lazy="selectin") 
+referrals_made = relationship( 
+"Referral", 
+foreign_keys="Referral.referrer_id", 
+back_populates="referrer", 
+lazy="selectin" 
+) 
+app/models/subscription.py 
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Numeric, Enum 
+from sqlalchemy.orm import relationship 
+from sqlalchemy.sql import func 
+import enum 
+from app.core.database import Base 
+class SubscriptionStatus(str, enum.Enum): 
+ACTIVE = "active" 
+EXPIRED = "expired" 
+CANCELLED = "cancelled" 
+PENDING = "pending" 
+class Subscription(Base): 
+tablename = "subscriptions" 
+id = Column(Integer, primary_key=True, index=True) 
+user_id = Column(Integer, ForeignKey("users.id"), nullable=False) 
+tariff_id = Column(Integer, ForeignKey("tariffs.id"), nullable=False) 
+server_id = Column(Integer, ForeignKey("servers.id"), nullable=False) 
+start_date = Column(DateTime(timezone=True), nullable=False) 
+end_date = Column(DateTime(timezone=True), nullable=False) 
+status = Column(String(50), default=SubscriptionStatus.PENDING) 
+marzban_username = Column(String(255), nullable=True) 
+created_at = Column(DateTime(timezone=True), 
+server_default=func.now()) 
+user = relationship("User", back_populates="subscriptions") 
+tariff = relationship("Tariff", lazy="selectin") 
+server = relationship("Server", lazy="selectin") 
+app/models/payment.py 
+from sqlalchemy import Column, Integer, String, Numeric, DateTime, ForeignKey 
+from sqlalchemy.orm import relationship 
+from sqlalchemy.sql import func 
+from app.core.database import Base 
+class Payment(Base): 
+tablename = "payments" 
+id = Column(Integer, primary_key=True, index=True) 
+user_id = Column(Integer, ForeignKey("users.id"), nullable=False) 
+subscription_id = Column(Integer, ForeignKey("subscriptions.id"), 
+nullable=True) 
+amount = Column(Numeric(10, 2), nullable=False) 
+currency = Column(String(10), default="RUB") 
+provider = Column(String(50), nullable=False) 
+provider_payment_id = Column(String(255), unique=True, nullable=False) 
+status = Column(String(50), default="pending") 
+metadata_json = Column(String(1000), nullable=True) 
+created_at = Column(DateTime(timezone=True), 
+server_default=func.now()) 
+paid_at = Column(DateTime(timezone=True), nullable=True) 
+user = relationship("User", back_populates="payments") 
+app/models/tariff.py 
+from sqlalchemy import Column, Integer, String, Numeric, Boolean, DateTime, Text 
+from sqlalchemy.sql import func 
+from app.core.database import Base 
+class Tariff(Base): 
+tablename = "tariffs" 
+id = Column(Integer, primary_key=True, index=True) 
+name = Column(String(255), nullable=False) 
+duration_months = Column(Integer, nullable=False) 
+price = Column(Numeric(10, 2), nullable=False) 
+discount_percent = Column(Integer, default=0) 
+description = Column(Text, nullable=True) 
+is_active = Column(Boolean, default=True) 
+created_at = Column(DateTime(timezone=True), 
+server_default=func.now()) 
+app/models/server.py 
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Numeric 
+from sqlalchemy.sql import func 
+from app.core.database import Base 
+class Server(Base): 
+tablename = "servers" 
+id = Column(Integer, primary_key=True, index=True) 
+name = Column(String(255), nullable=False) 
+host = Column(String(255), nullable=False) 
+marzban_node_id = Column(String(255), nullable=True) 
+max_users = Column(Integer, default=100) 
+current_users = Column(Integer, default=0) 
+is_active = Column(Boolean, default=True) 
+location = Column(String(255), nullable=True) 
+cpu_usage = Column(Numeric(5, 2), default=0) 
+ram_usage = Column(Numeric(5, 2), default=0) 
+created_at = Column(DateTime(timezone=True), 
+server_default=func.now()) 
+app/models/referral.py 
+from sqlalchemy import Column, Integer, DateTime, ForeignKey 
+from sqlalchemy.orm import relationship 
+from sqlalchemy.sql import func 
+from app.core.database import Base 
+ 
+class Referral(Base): 
+tablename = "referrals" 
+id = Column(Integer, primary_key=True, index=True) 
+referrer_id = Column(Integer, ForeignKey("users.id"), nullable=False) 
+referred_id = Column(Integer, ForeignKey("users.id"), nullable=False) 
+bonus_days_given = Column(Integer, default=0) 
+created_at = Column(DateTime(timezone=True), 
+server_default=func.now()) 
+ 
+referrer = relationship( 
+    "User", 
+    foreign_keys=[referrer_id], 
+    back_populates="referrals_made" 
+) 
+ 
+ 
+ 
+СЕРВИСЫ 
+ 
+app/services/user_service.py 
+import secrets 
+import string 
+from sqlalchemy import select, update 
+from sqlalchemy.exc import IntegrityError 
+from app.core.database import async_session 
+from app.models.user import User 
+ 
+class UserService: 
+async def get_or_create_user(self, telegram_id: int, username: str = None, 
+first_name: str = None, last_name: str = None, 
+referral_code: str = None): 
+async with async_session() as session: 
+result = await session.execute( 
+select(User).where(User.telegram_id == telegram_id) 
+) 
+user = result.scalar_one_or_none() 
+        if user: 
+            if not user.is_banned: 
+                user.username = username 
+                user.first_name = first_name 
+                user.last_name = last_name 
+                await session.commit() 
+            return user 
+         
+        new_referral_code = self._generate_referral_code() 
+         
+        referrer_id = None 
+        if referral_code: 
+            referrer_result = await session.execute( 
+                select(User).where(User.referral_code == 
+referral_code) 
+            ) 
+            referrer = referrer_result.scalar_one_or_none() 
+            if referrer and referrer.telegram_id != telegram_id: 
+                referrer_id = referrer.id 
+         
+        user = User( 
+            telegram_id=telegram_id, 
+            username=username, 
+            first_name=first_name, 
+            last_name=last_name, 
+            referral_code=new_referral_code, 
+            referred_by=referrer_id 
+        ) 
+        session.add(user) 
+         
+        try: 
+            await session.commit() 
+            await session.refresh(user) 
+             
+            if referrer_id: 
+                await self._process_referral_bonus(session, 
+referrer_id, user.id) 
+             
+        except IntegrityError: 
+            await session.rollback() 
+            result = await session.execute( 
+                select(User).where(User.telegram_id == telegram_id) 
+            ) 
+            return result.scalar_one() 
+         
+        return user 
+ 
+async def get_user_by_telegram_id(self, telegram_id: int): 
+    async with async_session() as session: 
+        result = await session.execute( 
+            select(User).where(User.telegram_id == telegram_id) 
+        ) 
+        return result.scalar_one_or_none() 
+ 
+async def get_user_by_referral_code(self, referral_code: str): 
+    async with async_session() as session: 
+        result = await session.execute( 
+            select(User).where(User.referral_code == referral_code) 
+        ) 
+        return result.scalar_one_or_none() 
+ 
+def _generate_referral_code(self) -> str: 
+    alphabet = string.ascii_letters + string.digits 
+    return ''.join(secrets.choice(alphabet) for _ in range(8)) 
+ 
+async def _process_referral_bonus(self, session, referrer_id: int, 
+referred_id: int): 
+    from app.models.referral import Referral 
+    referral = Referral( 
+        referrer_id=referrer_id, 
+        referred_id=referred_id, 
+        bonus_days_given=3 
+    ) 
+    session.add(referral) 
+    await session.commit() 
+ 
+ 
+ 
+app/services/subscription_service.py 
+from datetime import datetime, timedelta 
+from sqlalchemy import select, update, and_ 
+from app.core.database import async_session 
+from app.models.subscription import Subscription, SubscriptionStatus 
+from app.models.tariff import Tariff 
+from app.models.server import Server 
+from app.services.marzban_service import MarzbanService 
+ 
+class SubscriptionService: 
+async def create_subscription(self, user_id: int, tariff_id: int, server_id: int = None): 
+async with async_session() as session: 
+tariff = await session.get(Tariff, tariff_id) 
+if not tariff or not tariff.is_active: 
+return None 
+        if not server_id: 
+            server = await self._get_available_server(session) 
+            if not server: 
+                return None 
+            server_id = server.id 
+         
+        start_date = datetime.utcnow() 
+        end_date = start_date + timedelta(days=tariff.duration_months 
+* 30) 
+         
+        subscription = Subscription( 
+            user_id=user_id, 
+            tariff_id=tariff_id, 
+            server_id=server_id, 
+            start_date=start_date, 
+            end_date=end_date, 
+            status=SubscriptionStatus.PENDING 
+        ) 
+        session.add(subscription) 
+        await session.commit() 
+        await session.refresh(subscription) 
+         
+        return subscription 
+ 
+async def activate_subscription(self, subscription_id: int, 
+marzban_username: str): 
+    async with async_session() as session: 
+        result = await session.execute( 
+            update(Subscription) 
+            .where(Subscription.id == subscription_id) 
+            .values( 
+                status=SubscriptionStatus.ACTIVE, 
+                marzban_username=marzban_username 
+            ) 
+            .returning(Subscription) 
+        ) 
+        await session.commit() 
+        return result.scalar_one_or_none() 
+ 
+async def get_active_subscription(self, user_id: int): 
+    async with async_session() as session: 
+        result = await session.execute( 
+            select(Subscription) 
+            .where( 
+                and_( 
+                    Subscription.user_id == user_id, 
+                    Subscription.status == SubscriptionStatus.ACTIVE 
+                ) 
+            ) 
+            .order_by(Subscription.end_date.desc()) 
+        ) 
+        return result.scalar_one_or_none() 
+ 
+async def get_expiring_subscriptions(self, days: int): 
+    async with async_session() as session: 
+        target_date = datetime.utcnow() + timedelta(days=days) 
+        result = await session.execute( 
+            select(Subscription) 
+            .where( 
+                and_( 
+                    Subscription.status == SubscriptionStatus.ACTIVE, 
+                    Subscription.end_date <= target_date, 
+                    Subscription.end_date > datetime.utcnow() 
+                ) 
+            ) 
+        ) 
+        return result.scalars().all() 
+ 
+async def deactivate_expired_subscriptions(self): 
+    async with async_session() as session: 
+        result = await session.execute( 
+            select(Subscription) 
+            .where( 
+                and_( 
+                    Subscription.status == SubscriptionStatus.ACTIVE, 
+                    Subscription.end_date <= datetime.utcnow() 
+                ) 
+            ) 
+        ) 
+        expired = result.scalars().all() 
+         
+        marzban = MarzbanService() 
+        for sub in expired: 
+            sub.status = SubscriptionStatus.EXPIRED 
+            if sub.marzban_username: 
+                await marzban.disable_user(sub.marzban_username) 
+         
+        await session.commit() 
+        return len(expired) 
+ 
+async def _get_available_server(self, session): 
+    result = await session.execute( 
+        select(Server) 
+        .where( 
+            and_( 
+                Server.is_active == True, 
+                Server.current_users < Server.max_users 
+            ) 
+        ) 
+        .order_by(Server.current_users.asc()) 
+    ) 
+    return result.scalar_one_or_none() 
+ 
+ 
+ 
+app/services/marzban_service.py 
+import httpx 
+import uuid 
+from app.core.config import settings 
+ 
+class MarzbanService: 
+def init(self): 
+self.base_url = settings.MARZBAN_URL.rstrip('/') 
+self.username = settings.MARZBAN_USERNAME 
+self.password = settings.MARZBAN_PASSWORD 
+self._token = None 
+async def _get_token(self): 
+    if self._token: 
+        return self._token 
+     
+    async with httpx.AsyncClient( 
+        verify=not settings.MARZBAN_INSECURE, 
+        timeout=30.0 
+    ) as client: 
+        response = await client.post( 
+            f"{self.base_url}/api/admin/token", 
+            data={ 
+                "username": self.username, 
+                "password": self.password 
+            } 
+        ) 
+        response.raise_for_status() 
+        self._token = response.json()["access_token"] 
+        return self._token 
+ 
+async def create_user(self, username: str, expire_days: int = 30) -> 
+dict: 
+    token = await self._get_token() 
+     
+    user_uuid = str(uuid.uuid4()) 
+     
+    async with httpx.AsyncClient( 
+        verify=not settings.MARZBAN_INSECURE, 
+        timeout=30.0 
+    ) as client: 
+        response = await client.post( 
+            f"{self.base_url}/api/user", 
+            headers={"Authorization": f"Bearer {token}"}, 
+            json={ 
+                "username": username, 
+                "expire": expire_days * 86400, 
+                "data_limit": 0, 
+                "proxies": { 
+                    "vless": {"id": user_uuid, "flow": 
+"xtls-rprx-vision"} 
+                }, 
+                "inbounds": { 
+                    "vless": ["VLESS Reality TCP"] 
+                } 
+            } 
+        ) 
+        response.raise_for_status() 
+        return response.json() 
+ 
+async def get_user_config(self, username: str) -> dict: 
+    token = await self._get_token() 
+     
+    async with httpx.AsyncClient( 
+        verify=not settings.MARZBAN_INSECURE, 
+        timeout=30.0 
+    ) as client: 
+        response = await client.get( 
+            f"{self.base_url}/api/user/{username}", 
+            headers={"Authorization": f"Bearer {token}"} 
+        ) 
+        response.raise_for_status() 
+        return response.json() 
+ 
+async def get_user_subscription_url(self, username: str) -> str: 
+    token = await self._get_token() 
+     
+    async with httpx.AsyncClient( 
+        verify=not settings.MARZBAN_INSECURE, 
+        timeout=30.0 
+    ) as client: 
+        response = await client.get( 
+            f"{self.base_url}/api/user/{username}/subscription", 
+            headers={"Authorization": f"Bearer {token}"}, 
+            follow_redirects=False 
+        ) 
+        return response.headers.get("location", "") 
+ 
+async def disable_user(self, username: str): 
+    token = await self._get_token() 
+     
+    async with httpx.AsyncClient( 
+        verify=not settings.MARZBAN_INSECURE, 
+        timeout=30.0 
+    ) as client: 
+        response = await client.put( 
+            f"{self.base_url}/api/user/{username}", 
+            headers={"Authorization": f"Bearer {token}"}, 
+            json={"status": "disabled"} 
+        ) 
+        response.raise_for_status() 
+        return response.json() 
+ 
+async def enable_user(self, username: str): 
+    token = await self._get_token() 
+     
+    async with httpx.AsyncClient( 
+        verify=not settings.MARZBAN_INSECURE, 
+        timeout=30.0 
+    ) as client: 
+        response = await client.put( 
+            f"{self.base_url}/api/user/{username}", 
+            headers={"Authorization": f"Bearer {token}"}, 
+            json={"status": "active"} 
+        ) 
+        response.raise_for_status() 
+        return response.json() 
+ 
+ 
+ 
+app/services/notification_service.py 
+from datetime import datetime, timedelta 
+from sqlalchemy import select, and_ 
+from app.core.database import async_session 
+from app.models.subscription import Subscription, SubscriptionStatus 
+from app.models.user import User 
+from app.core.redis import redis_client 
+import json 
+ 
+class NotificationService: 
+async def notify_expiring_subscriptions(self): 
+async with async_session() as session: 
+now = datetime.utcnow() 
+        for days in [7, 3, 1]: 
+            target_date = now + timedelta(days=days) 
+             
+            result = await session.execute( 
+                select(Subscription, User) 
+                .join(User) 
+                .where( 
+                    and_( 
+                        Subscription.status == 
+SubscriptionStatus.ACTIVE, 
+                        Subscription.end_date <= target_date, 
+                        Subscription.end_date > target_date - 
+timedelta(days=1) 
+                    ) 
+                ) 
+            ) 
+             
+            for sub, user in result: 
+                await self._send_notification(user.telegram_id, days, 
+sub) 
+ 
+async def _send_notification(self, telegram_id: int, days: int, 
+subscription): 
+    from aiogram import Bot 
+    from app.core.config import settings 
+     
+    bot = Bot(token=settings.BOT_TOKEN) 
+     
+    messages = { 
+        7: ( 
+            "
+⚠
+ <b>Подписка заканчивается через 7 дней!</b>\n\n" 
+            f"Дата окончания: 
+{subscription.end_date.strftime('%d.%m.%Y')}\n\n" 
+            "Продлите сейчас, чтобы не потерять доступ к VPN." 
+        ), 
+        3: ( 
+            "
+⏳
+ <b>Осталось 3 дня до окончания подписки!</b>\n\n" 
+            f"Дата окончания: 
+{subscription.end_date.strftime('%d.%m.%Y')}\n\n" 
+            "Не забудьте продлить подписку." 
+        ), 
+        1: ( 
+            "
+🚨
+ <b>Завтра отключение!</b>\n\n" 
+            f"Дата окончания: 
+{subscription.end_date.strftime('%d.%m.%Y')}\n\n" 
+            "Срочно продлите подписку, чтобы не потерять доступ." 
+        ) 
+    } 
+     
+    try: 
+        await bot.send_message( 
+            telegram_id, 
+            messages.get(days, "Подписка скоро закончится!"), 
+            parse_mode="HTML" 
+        ) 
+    except Exception as e: 
+        print(f"Failed to send notification to {telegram_id}: {e}") 
+    finally: 
+        await bot.session.close() 
+ 
+async def notify_expired_users(self): 
+    async with async_session() as session: 
+        now = datetime.utcnow() 
+         
+        result = await session.execute( 
+            select(Subscription, User) 
+            .join(User) 
+            .where( 
+                and_( 
+                    Subscription.status == SubscriptionStatus.EXPIRED, 
+                    Subscription.end_date <= now, 
+                    Subscription.end_date > now - timedelta(days=1) 
+                ) 
+            ) 
+        ) 
+         
+        for sub, user in result: 
+            from aiogram import Bot 
+            from app.core.config import settings 
+             
+            bot = Bot(token=settings.BOT_TOKEN) 
+            try: 
+                await bot.send_message( 
+                    user.telegram_id, 
+                    ( 
+                        "
+❌
+ <b>Подписка истекла!</b>\n\n" 
+                        "Ваш доступ к VPN был отключен.\n\n" 
+                        "Нажмите 'Купить подписку', чтобы восстановить 
+доступ." 
+                    ), 
+                    parse_mode="HTML" 
+                ) 
+            except Exception as e: 
+                print(f"Failed to notify expired user 
+{user.telegram_id}: {e}") 
+            finally: 
+                await bot.session.close() 
+ 
+ 
+ 
+app/services/payment_service.py 
+from decimal import Decimal 
+from sqlalchemy import select, update 
+from app.core.database import async_session 
+from app.models.payment import Payment 
+from app.models.subscription import Subscription, SubscriptionStatus 
+from app.models.user import User 
+from app.services.subscription_service import SubscriptionService 
+from app.services.marzban_service import MarzbanService 
+from app.services.notification_service import NotificationService 
+import json 
+ 
+class PaymentService: 
+async def create_payment(self, user_id: int, amount: Decimal, 
+provider: str, tariff_id: int) -> Payment: 
+async with async_session() as session: 
+import uuid 
+        payment = Payment( 
+            user_id=user_id, 
+            amount=amount, 
+            provider=provider, 
+            provider_payment_id=str(uuid.uuid4()), 
+            status="pending", 
+            metadata_json=json.dumps({"tariff_id": tariff_id}) 
+        ) 
+        session.add(payment) 
+        await session.commit() 
+        await session.refresh(payment) 
+        return payment 
+ 
+async def process_successful_payment(self, provider_payment_id: str): 
+    async with async_session() as session: 
+        result = await session.execute( 
+            select(Payment).where( 
+                Payment.provider_payment_id == provider_payment_id 
+            ) 
+        ) 
+        payment = result.scalar_one_or_none() 
+         
+        if not payment or payment.status == "success": 
+            return None 
+         
+        payment.status = "success" 
+        payment.paid_at = datetime.utcnow() 
+         
+        metadata = json.loads(payment.metadata_json or "{}") 
+        tariff_id = metadata.get("tariff_id") 
+         
+        if tariff_id: 
+            subscription_service = SubscriptionService() 
+            subscription = await 
+subscription_service.create_subscription( 
+                payment.user_id, tariff_id 
+            ) 
+             
+            if subscription: 
+                marzban = MarzbanService() 
+                user = await session.get(User, payment.user_id) 
+                 
+                marzban_username = 
+f"user_{user.telegram_id}_{subscription.id}" 
+                marzban_user = await marzban.create_user( 
+                    marzban_username, 
+                    subscription.tariff.duration_months * 30 
+                ) 
+                 
+                await subscription_service.activate_subscription( 
+                    subscription.id, marzban_username 
+                ) 
+                 
+                payment.subscription_id = subscription.id 
+         
+        await session.commit() 
+        return payment 
+ 
+ 
+ 
+app/services/scheduler_service.py 
+from apscheduler.schedulers.asyncio import AsyncIOScheduler 
+from apscheduler.triggers.cron import CronTrigger 
+from app.services.notification_service import NotificationService 
+from app.services.subscription_service import SubscriptionService 
+ 
+class SchedulerService: 
+def init(self): 
+self.scheduler = AsyncIOScheduler() 
+self.notification_service = NotificationService() 
+self.subscription_service = SubscriptionService() 
+def start(self): 
+    self.scheduler.add_job( 
+        self.check_expiring_subscriptions, 
+        CronTrigger(hour="*/6"), 
+        id="check_expiring", 
+        replace_existing=True 
+    ) 
+     
+    self.scheduler.add_job( 
+        self.deactivate_expired, 
+        CronTrigger(hour=0, minute=0), 
+        id="deactivate_expired", 
+        replace_existing=True 
+    ) 
+     
+    self.scheduler.add_job( 
+        self.notify_expired, 
+        CronTrigger(hour=1, minute=0), 
+        id="notify_expired", 
+        replace_existing=True 
+    ) 
+     
+    self.scheduler.start() 
+ 
+async def check_expiring_subscriptions(self): 
+    await self.notification_service.notify_expiring_subscriptions() 
+ 
+async def deactivate_expired(self): 
+    count = await 
+self.subscription_service.deactivate_expired_subscriptions() 
+    print(f"Deactivated {count} expired subscriptions") 
+ 
+async def notify_expired(self): 
+    await self.notification_service.notify_expired_users() 
+ 
+ 
+ 
+ОБРАБОТЧИКИ БОТА 
+ 
+app/bot/handlers/start.py 
+from aiogram import Router, F 
+from aiogram.types import Message, CallbackQuery 
+from aiogram.filters import CommandStart, Command 
+from aiogram.fsm.context import FSMContext 
+from app.bot.keyboards.main_menu import get_main_menu, get_tariffs_menu 
+from app.services.user_service import UserService 
+from app.services.subscription_service import SubscriptionService 
+from app.services.marzban_service import MarzbanService 
+ 
+router = Router() 
+ 
+@router.message(CommandStart()) 
+async def cmd_start(message: Message, state: FSMContext): 
+args = message.text.split()[1:] if len(message.text.split()) > 1 else [] 
+referral_code = args[0] if args else None 
+user_service = UserService() 
+user = await user_service.get_or_create_user( 
+    telegram_id=message.from_user.id, 
+    username=message.from_user.username, 
+    first_name=message.from_user.first_name, 
+    last_name=message.from_user.last_name, 
+    referral_code=referral_code 
+) 
+ 
+if user.is_banned: 
+    await message.answer("
+⛔
+ Ваш аккаунт заблокирован.") 
+    return 
+ 
+await message.answer( 
+    f"
+👋
+ Привет, {message.from_user.first_name}!\n\n" 
+    f"Добро пожаловать в VPN сервис.\n\n" 
+    f"Выберите действие:", 
+    reply_markup=get_main_menu() 
+) 
+ 
+ 
+@router.message(F.text == "Купить подписку") 
+async def buy_subscription(message: Message): 
+await message.answer( 
+"
+📋
+ Выберите тариф:\n\n" 
+"1 мес — 249₽\n" 
+"3 мес — 669₽ (-10%)\n" 
+"6 мес — 1199₽ (-20%)\n" 
+"12 мес — 1899₽ (-37%)", 
+reply_markup=get_tariffs_menu() 
+) 
+ 
+@router.message(F.text == "Мой профиль") 
+async def show_profile(message: Message): 
+user_service = UserService() 
+user = await user_service.get_user_by_telegram_id(message.from_user.id) 
+if not user: 
+    await message.answer("
+❌
+ Пользователь не найден.") 
+    return 
+ 
+subscription_service = SubscriptionService() 
+active_sub = await 
+subscription_service.get_active_subscription(user.id) 
+ 
+if active_sub: 
+    days_left = (active_sub.end_date - datetime.utcnow()).days 
+    status_text = ( 
+        f"
+✅
+ Активна до {active_sub.end_date.strftime('%d.%m.%Y')}\n" 
+        f"Осталось дней: {days_left}" 
+    ) 
+else: 
+    status_text = "
+❌
+ Нет активной подписки" 
+ 
+await message.answer( 
+    f"
+👤
+ <b>Ваш профиль</b>\n\n" 
+    f"ID: {user.telegram_id}\n" 
+    f"Реферальный код: {user.referral_code}\n\n" 
+    f"
+📊
+ Подписка:\n{status_text}\n\n" 
+    f"
+👥
+ Рефералов: {len(user.referrals_made)}", 
+    parse_mode="HTML" 
+) 
+ 
+ 
+@router.message(F.text == "Реферальная система") 
+async def show_referral(message: Message): 
+user_service = UserService() 
+user = await user_service.get_user_by_telegram_id(message.from_user.id) 
+if not user: 
+    return 
+ 
+bot_username = (await message.bot.get_me()).username 
+referral_link = 
+f"https://t.me/{bot_username}?start={user.referral_code}" 
+ 
+await message.answer( 
+    f"
+🎁
+ <b>Реферальная система</b>\n\n" 
+    f"Ваша ссылка:\n<code>{referral_link}</code>\n\n" 
+    f"<b>Бонусы:</b>\n" 
+    f"• Друг получает +3 дня за регистрацию\n" 
+    f"• Вы получаете +1 день за регистрацию друга\n\n" 
+    f"<b>За покупку друга:</b>\n" 
+    f"• 1 мес → +10 дней\n" 
+    f"• 3 мес → +25 дней\n" 
+    f"• 6 мес → +45 дней\n" 
+    f"• 12 мес → +65 дней\n\n" 
+    f"
+👥
+ Приглашено: {len(user.referrals_made)} чел\n" 
+    f"
+🎁
+ Получено дней: {sum(r.bonus_days_given for r in 
+user.referrals_made)}", 
+    parse_mode="HTML" 
+) 
+ 
+ 
+ 
+app/bot/handlers/payments.py 
+from aiogram import Router, F 
+from aiogram.types import CallbackQuery, Message 
+from aiogram.fsm.context import FSMContext 
+from app.bot.keyboards.main_menu import get_payment_methods_menu 
+from app.services.payment_service import PaymentService 
+from app.services.user_service import UserService 
+from decimal import Decimal 
+ 
+router = Router() 
+ 
+@router.callback_query(F.data.startswith("tariff_")) 
+async def process_tariff(callback: CallbackQuery): 
+tariff_id = int(callback.data.split("_")[1]) 
+prices = {1: Decimal("249.00"), 3: Decimal("669.00"),  
+          6: Decimal("1199.00"), 12: Decimal("1899.00")} 
+ 
+await callback.message.edit_text( 
+    f"
+💳
+ Выберите способ оплаты для тарифа {tariff_id} мес 
+({prices.get(tariff_id, 'N/A')}₽):", 
+    reply_markup=get_payment_methods_menu(tariff_id) 
+) 
+ 
+ 
+@router.callback_query(F.data.startswith("pay_card_")) 
+async def process_card_payment(callback: CallbackQuery): 
+tariff_id = int(callback.data.split("_")[2]) 
+user_service = UserService() 
+user = await 
+user_service.get_user_by_telegram_id(callback.from_user.id) 
+ 
+payment_service = PaymentService() 
+prices = {1: Decimal("249.00"), 3: Decimal("669.00"),  
+          6: Decimal("1199.00"), 12: Decimal("1899.00")} 
+ 
+payment = await payment_service.create_payment( 
+    user_id=user.id, 
+    amount=prices.get(tariff_id, Decimal("249.00")), 
+    provider="yookassa", 
+tariff_id=tariff_id 
+) 
+await callback.message.edit_text( 
+f"
+✅
+ Платёж создан!\n\n" 
+f"ID: {payment.provider_payment_id}\n" 
+f"Сумма: {payment.amount}₽\n\n" 
+f"После оплаты подписка будет активирована автоматически." 
+) 
+app/bot/keyboards/main_menu.py 
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton 
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton 
+def get_main_menu() -> ReplyKeyboardMarkup: 
+keyboard = [ 
+[KeyboardButton(text="Купить подписку")], 
+[KeyboardButton(text="Мой профиль"), KeyboardButton(text="Подарить подписку")], 
+[KeyboardButton(text="Реферальная система"), KeyboardButton(text="Помощь")] 
+] 
+return ReplyKeyboardMarkup( 
+keyboard=keyboard, 
+resize_keyboard=True, 
+input_field_placeholder="Выберите действие" 
+) 
+def get_tariffs_menu() -> InlineKeyboardMarkup: 
+keyboard = [ 
+[InlineKeyboardButton(text="1 мес — 249₽", callback_data="tariff_1")], 
+[InlineKeyboardButton(text="3 мес — 669₽ (-10%)", callback_data="tariff_3")], 
+[InlineKeyboardButton(text="6 мес — 1199₽ (-20%)", callback_data="tariff_6")], 
+[InlineKeyboardButton(text="12 мес — 1899₽ (-37%)", callback_data="tariff_12")], 
+] 
+return InlineKeyboardMarkup(inline_keyboard=keyboard) 
+def get_payment_methods_menu(tariff_id: int) -> InlineKeyboardMarkup: 
+keyboard = [ 
+[InlineKeyboardButton(text="
+💳
+ СБП", callback_data=f"pay_sbp_{tariff_id}")], 
+[InlineKeyboardButton(text="
+💳
+ Банковская карта", callback_data=f"pay_card_{tariff_id}")], 
+[InlineKeyboardButton(text="₿ Криптовалюта", callback_data=f"pay_crypto_{tariff_id}")], 
+] 
+[InlineKeyboardButton(text="
+❌
+ Отмена", callback_data="cancel_payment")] 
+return InlineKeyboardMarkup(inline_keyboard=keyboard) 
+ 
+ 
+app/bot/middlewares/ban_middleware.p
+y 
+from aiogram import BaseMiddleware 
+from aiogram.types import Message, CallbackQuery 
+from typing import Callable, Dict, Any, Awaitable 
+from app.services.user_service import UserService 
+ 
+class BanMiddleware(BaseMiddleware): 
+async def call( 
+self, 
+handler: Callable[[Message, Dict[str, Any]], Awaitable[Any]], 
+event: Message, 
+data: Dict[str, Any] 
+) -> Any: 
+if isinstance(event, (Message, CallbackQuery)): 
+user_service = UserService() 
+user = await user_service.get_user_by_telegram_id(event.from_user.id) 
+        if user and user.is_banned: 
+            if isinstance(event, Message): 
+                await event.answer("
+⛔
+ Ваш аккаунт заблокирован.") 
+            return None 
+     
+    return await handler(event, data) 
+ 
+ 
+ 
+app/bot/middlewares/logging_middlewar
+e.py 
+from aiogram import BaseMiddleware 
+from aiogram.types import Message, CallbackQuery 
+from typing import Callable, Dict, Any, Awaitable 
+import logging 
+ 
+logger = logging.getLogger(name) 
+ 
+class LoggingMiddleware(BaseMiddleware): 
+async def call( 
+self, 
+handler: Callable[[Message, Dict[str, Any]], Awaitable[Any]], 
+event: Message, 
+data: Dict[str, Any] 
+) -> Any: 
+if isinstance(event, (Message, CallbackQuery)): 
+user_id = event.from_user.id 
+username = event.from_user.username or "N/A" 
+        if isinstance(event, Message) and event.text: 
+            logger.info(f"User {user_id} (@{username}): {event.text}") 
+        elif isinstance(event, CallbackQuery): 
+            logger.info(f"User {user_id} (@{username}): callback 
+{event.data}") 
+     
+    return await handler(event, data) 
+ 
+ 
+ 
+АДМИН-ПАНЕЛЬ 
+ 
+app/admin/app.py 
+from fastapi import FastAPI, Depends, HTTPException, Request, status 
+from fastapi.templating import Jinja2Templates 
+from fastapi.staticfiles import StaticFiles 
+from fastapi.security import HTTPBasic, HTTPBasicCredentials 
+from fastapi.responses import HTMLResponse, RedirectResponse 
+from sqlalchemy import select, func, and_ 
+from app.core.database import async_session 
+from app.models.user import User 
+from app.models.payment import Payment 
+from app.models.subscription import Subscription, SubscriptionStatus 
+from app.models.server import Server 
+from app.models.tariff import Tariff 
+from app.core.config import settings 
+import secrets 
+ 
+admin_app = FastAPI(title="VPN Bot Admin Panel") 
+ 
+security = HTTPBasic() 
+ 
+def verify_admin(credentials: HTTPBasicCredentials = Depends(security)): 
+is_correct_username = secrets.compare_digest( 
+credentials.username, settings.ADMIN_USERNAME 
+) 
+is_correct_password = secrets.compare_digest( 
+credentials.password, settings.ADMIN_PASSWORD 
+) 
+if not (is_correct_username and is_correct_password): 
+raise HTTPException( 
+status_code=status.HTTP_401_UNAUTHORIZED, 
+detail="Incorrect username or password", 
+headers={"WWW-Authenticate": "Basic"} 
+) 
+return credentials.username 
+ 
+@admin_app.get("/", response_class=HTMLResponse) 
+async def dashboard(request: Request, admin: str = Depends(verify_admin)): 
+async with async_session() as session: 
+total_users = await session.execute(select(func.count(User.id))) 
+total_revenue = await session.execute( 
+select(func.sum(Payment.amount)).where(Payment.status == "success") 
+) 
+active_subs = await session.execute( 
+select(func.count(Subscription.id)) 
+.where(Subscription.status == SubscriptionStatus.ACTIVE) 
+) 
+today_revenue = await session.execute( 
+select(func.sum(Payment.amount)) 
+.where( 
+and_( 
+Payment.status == "success", 
+Payment.paid_at >= datetime.utcnow().replace(hour=0, minute=0) 
+) 
+) 
+) 
+    return f""" 
+    <html> 
+    <head><title>VPN Bot Admin</title></head> 
+    <body> 
+        <h1>VPN Bot Dashboard</h1> 
+        <div style="display: grid; grid-template-columns: repeat(4, 
+1fr); gap: 20px;"> 
+            <div style="border: 1px solid #ccc; padding: 20px; 
+border-radius: 8px;"> 
+                <h3>Всего пользователей</h3> 
+                <p style="font-size: 32px; font-weight: 
+bold;">{total_users.scalar()}</p> 
+            </div> 
+            <div style="border: 1px solid #ccc; padding: 20px; 
+border-radius: 8px;"> 
+                <h3>Активных подписок</h3> 
+                <p style="font-size: 32px; font-weight: 
+bold;">{active_subs.scalar()}</p> 
+            </div> 
+            <div style="border: 1px solid #ccc; padding: 20px; 
+border-radius: 8px;"> 
+                <h3>Общая выручка</h3> 
+                <p style="font-size: 32px; font-weight: 
+bold;">{total_revenue.scalar() or 0}₽</p> 
+            </div> 
+            <div style="border: 1px solid #ccc; padding: 20px; 
+border-radius: 8px;"> 
+                <h3>Выручка сегодня</h3> 
+                <p style="font-size: 32px; font-weight: 
+bold;">{today_revenue.scalar() or 0}₽</p> 
+            </div> 
+        </div> 
+        <div style="margin-top: 30px;"> 
+            <a href="/users">Пользователи</a> |  
+            <a href="/payments">Платежи</a> |  
+            <a href="/servers">Серверы</a> 
+        </div> 
+    </body> 
+    </html> 
+    """ 
+ 
+ 
+@admin_app.get("/users", response_class=HTMLResponse) 
+async def users_list(request: Request, admin: str = Depends(verify_admin)): 
+async with async_session() as session: 
+result = await session.execute( 
+select(User).order_by(User.created_at.desc()).limit(100) 
+) 
+users = result.scalars().all() 
+    users_html = "" 
+    for user in users: 
+        users_html += f""" 
+        <tr> 
+            <td>{user.id}</td> 
+            <td>{user.telegram_id}</td> 
+            <td>@{user.username or 'N/A'}</td> 
+            <td>{user.first_name or ''} {user.last_name or ''}</td> 
+            <td>{user.referral_code}</td> 
+            <td>{'
+❌
+' if user.is_banned else '
+✅
+'}</td> 
+            <td>{user.created_at.strftime('%d.%m.%Y')}</td> 
+        </tr> 
+        """ 
+     
+    return f""" 
+    <html> 
+    <head><title>Пользователи</title></head> 
+    <body> 
+        <h1>Пользователи ({len(users)})</h1> 
+        <table border="1" cellpadding="10" style="border-collapse: 
+collapse;"> 
+            <tr> 
+                <th>ID</th> 
+                <th>Telegram ID</th> 
+                <th>Username</th> 
+                <th>Имя</th> 
+                <th>Реф. код</th> 
+                <th>Статус</th> 
+                <th>Дата рег.</th> 
+            </tr> 
+            {users_html} 
+        </table> 
+        <br><a href="/">← Назад</a> 
+    </body> 
+    </html> 
+    """ 
+ 
+ 
+ 
+app/main.py 
+import asyncio 
+import logging 
+from aiogram import Bot, Dispatcher 
+from aiogram.enums import ParseMode 
+from app.core.config import settings 
+from app.bot.handlers import start, payments, profile, referral, gift 
+from app.bot.middlewares import logging_middleware, ban_middleware 
+from app.admin.app import admin_app 
+ 
+logging.basicConfig( 
+level=logging.INFO, 
+format='%(asctime)s - %(name)s - %(levelname)s - %(message)s' 
+) 
+ 
+bot = Bot(token=settings.BOT_TOKEN, parse_mode=ParseMode.HTML) 
+dp = Dispatcher() 
+ 
+dp.message.middleware(logging_middleware.LoggingMiddleware()) 
+dp.message.middleware(ban_middleware.BanMiddleware()) 
+dp.callback_query.middleware(logging_middleware.LoggingMiddleware()) 
+dp.callback_query.middleware(ban_middleware.BanMiddleware()) 
+ 
+dp.include_router(start.router) 
+dp.include_router(payments.router) 
+async def main(): 
+if settings.WEBHOOK_URL: 
+await bot.set_webhook(settings.WEBHOOK_URL) 
+logging.info(f"Webhook set to {settings.WEBHOOK_URL}") 
+else: 
+await dp.start_polling(bot) 
+if name == "main": 
+asyncio.run(main()) 
+app/scheduler.py 
+import asyncio 
+from app.services.scheduler_service import SchedulerService 
+async def main(): 
+scheduler = SchedulerService() 
+scheduler.start() 
+try: 
+while True: 
+await asyncio.sleep(3600) 
+except KeyboardInterrupt: 
+pass 
+if name == "main": 
+asyncio.run(main()) 
+УТИЛИТЫ 
+app/utils/qr_generator.py 
+import qrcode 
+from io import BytesIO 
+from aiogram.types import BufferedInputFile 
+def generate_qr_code(data: str) -> BufferedInputFile: 
+qr = qrcode.QRCode( 
+version=1, 
+error_correction=qrcode.constants.ERROR_CORRECT_L, 
+box_size=10, 
+border=4 
+) 
+qr.add_data(data) 
+qr.make(fit=True) 
+img = qr.make_image(fill_color="black", back_color="white") 
+buffer = BytesIO() 
+img.save(buffer, format='PNG') 
+buffer.seek(0) 
+return BufferedInputFile(buffer.read(), filename="qr_code.png") 
+app/utils/helpers.py 
+from datetime import datetime, timedelta 
+def format_duration(days: int) -> str: 
+if days >= 365: 
+years = days // 365 
+return f"{years} год" if years == 1 else f"{years} года" 
+elif days >= 30: 
+months = days // 30 
+return f"{months} мес" 
+else: 
+return f"{days} дней" 
+def format_price(amount: float) -> str: 
+return f"{amount:,.0f}₽".replace(",", " ") 
+app/utils/validators.py 
+import re 
+def validate_referral_code(code: str) -> bool: 
+pattern = r'^[a-zA-Z0-9]{8}$' 
+return bool(re.match(pattern, code)) 
+def validate_telegram_id(telegram_id: str) -> bool: 
+try: 
+tid = int(telegram_id) 
+return tid > 0 
+except ValueError: 
+return False 
+ 
+ 
+ПЛАТЕЖНЫЕ ИНТЕГРАЦИИ 
+ 
+app/payments/yookassa.py 
+import httpx 
+from app.core.config import settings 
+from typing import Optional, Dict 
+ 
+class YooKassaPayment: 
+def init(self): 
+self.shop_id = settings.YOOKASSA_SHOP_ID 
+self.secret_key = settings.YOOKASSA_SECRET_KEY 
+self.base_url = "https://api.yookassa.ru/v3" 
+async def create_payment( 
+    self, 
+    amount: float, 
+    description: str, 
+    return_url: str, 
+    metadata: Dict 
+) -> Optional[Dict]: 
+    async with httpx.AsyncClient() as client: 
+        response = await client.post( 
+            f"{self.base_url}/payments", 
+            auth=(self.shop_id, self.secret_key), 
+            headers={ 
+                "Idempotence-Key": metadata.get("payment_id", ""), 
+                "Content-Type": "application/json" 
+            }, 
+            json={ 
+                "amount": { 
+                    "value": f"{amount:.2f}", 
+                    "currency": "RUB" 
+                }, 
+                "capture": True, 
+                "confirmation": { 
+                    "type": "redirect", 
+                    "return_url": return_url 
+                }, 
+                "description": description, 
+                "metadata": metadata 
+            } 
+        ) 
+         
+        if response.status_code == 200: 
+            return response.json() 
+        return None 
+ 
+ 
+ 
+app/payments/cryptobot.py 
+import httpx 
+from app.core.config import settings 
+ 
+class CryptoBotPayment: 
+def init(self): 
+self.token = settings.CRYPTOBOT_TOKEN 
+self.base_url = "https://pay.crypt.bot/api" 
+async def create_invoice(self, amount: float, description: str, 
+payload: str): 
+    async with httpx.AsyncClient() as client: 
+        response = await client.post( 
+            f"{self.base_url}/createInvoice", 
+            headers={"Crypto-Pay-API-Token": self.token}, 
+            json={ 
+                "asset": "USDT", 
+                "amount": str(amount), 
+                "description": description, 
+                "payload": payload, 
+                "paid_btn_name": "callback", 
+                "paid_btn_url": "https://t.me/your_bot" 
+            } 
+        ) 
+        response.raise_for_status() 
+        return response.json()["result"] 
+ 
+ 
+ 
+app/payments/cloudpayments.py 
+import httpx 
+from app.core.config import settings 
+ 
+class CloudPayments: 
+def init(self): 
+self.public_id = settings.CLOUDPAYMENTS_PUBLIC_ID 
+self.api_secret = settings.CLOUDPAYMENTS_API_SECRET 
+self.base_url = "https://api.cloudpayments.ru" 
+async def create_payment(self, amount: float, description: str,  
+                        currency: str = "RUB"): 
+    async with httpx.AsyncClient() as client: 
+        response = await client.post( 
+            f"{self.base_url}/payments/cryptogram", 
+            auth=(self.public_id, self.api_secret), 
+            json={ 
+                "Amount": amount, 
+                "Currency": currency, 
+                "Description": description 
+            } 
+        ) 
+        return response.json() 
+ 
+ 
+ 
+WEBHOOK ОБРАБОТЧИКИ 
+ 
+app/webhooks.py 
+from fastapi import FastAPI, Request, HTTPException 
+from app.core.config import settings 
+from app.services.payment_service import PaymentService 
+ 
+webhook_app = FastAPI() 
+ 
+@webhook_app.post("/webhook/yookassa") 
+async def yookassa_webhook(request: Request): 
+payload = await request.json() 
+if payload.get("event") == "payment.succeeded": 
+    payment_id = payload["object"]["id"] 
+    payment_service = PaymentService() 
+    await payment_service.process_successful_payment(payment_id) 
+ 
+return {"status": "ok"} 
+ 
+ 
+@webhook_app.post("/webhook/cryptobot") 
+async def cryptobot_webhook(request: Request): 
+payload = await request.json() 
+if payload.get("update_type") == "invoice_paid": 
+    payment_id = payload["payload"]["invoice_id"] 
+    payment_service = PaymentService() 
+    await payment_service.process_successful_payment(payment_id) 
+return {"status": "ok"} 
+@webhook_app.post("/webhook/cloudpayments") 
+async def cloudpayments_webhook(request: Request): 
+payload = await request.json() 
+if payload.get("Status") == "Completed": 
+payment_id = payload.get("TransactionId") 
+payment_service = PaymentService() 
+await payment_service.process_successful_payment(str(payment_id)) 
+return {"status": "ok"} 
+MIGRATIONS 
+alembic/env.py 
+from logging.config import fileConfig 
+from sqlalchemy import engine_from_config 
+from sqlalchemy import pool 
+from alembic import context 
+import asyncio 
+from sqlalchemy.ext.asyncio import AsyncEngine 
+config = context.config 
+if config.config_file_name is not None: 
+fileConfig(config.config_file_name) 
+from app.core.database import Base 
+from app.models import * 
+target_metadata = Base.metadata 
+def run_migrations_offline(): 
+url = config.get_main_option("sqlalchemy.url") 
+context.configure( 
+url=url, 
+target_metadata=target_metadata, 
+literal_binds=True, 
+dialect_opts={"paramstyle": "named"} 
+) 
+with context.begin_transaction(): 
+context.run_migrations() 
+async def run_migrations_online(): 
+connectable = AsyncEngine( 
+engine_from_config( 
+config.get_section(config.config_ini_section), 
+prefix="sqlalchemy.", 
+poolclass=pool.NullPool, 
+future=True 
+) 
+) 
+async with connectable.connect() as connection: 
+await connection.run_sync(do_run_migrations) 
+await connectable.dispose() 
+def do_run_migrations(connection): 
+context.configure(connection=connection, target_metadata=target_metadata) 
+with context.begin_transaction(): 
+context.run_migrations() 
+if context.is_offline_mode(): 
+run_migrations_offline() 
+else: 
+asyncio.run(run_migrations_online()) 
+alembic.ini (фрагмент) 
+[alembic] 
+script_location = alembic 
+prepend_sys_path = . 
+version_path_separator = os 
+sqlalchemy.url = postgresql+asyncpg://vpn_bot:changeme@localhost:5432/vpn_bot_db 
+[post_write_hooks] 
+[loggers] 
+keys = root,sqlalchemy,alembic 
+[handlers] 
+keys = console 
+[formatters] 
+keys = generic 
+[logger_root] 
+level = WARN 
+handlers = console 
+qualname = 
+[logger_sqlalchemy] 
+level = WARN 
+handlers = 
+qualname = sqlalchemy.engine 
+[logger_alembic] 
+level = INFO 
+handlers = 
+qualname = alembic 
+[handler_console] 
+class = StreamHandler 
+args = (sys.stderr,) 
+level = NOTSET 
+formatter = generic 
+[formatter_generic] 
+format = %(levelname)-5.5s [%(name)s] %(message)s 
+datefmt = %H:%M:%S 
+КОМАНДЫ ДЛЯ ЗАПУСКА 
+Инициализация проекта 
+python -m venv venv 
+source venv/bin/activate # Linux/Mac 
+venv\Scripts\activate # Windows 
+pip install -r requirements.txt 
+Настройка базы данных 
+alembic revision --autogenerate -m "initial" 
+alembic upgrade head 
+Запуск бота (polling) 
+python -m app.main 
+Запуск админ-панели 
+uvicorn app.main:admin_app --host 0.0.0.0 --port 8000 
+Запуск планировщика 
+python -m app.scheduler 
+Запуск всего через Docker 
+docker-compose up -d 
+Просмотр логов 
+docker-compose logs -f bot 
+docker-compose logs -f admin 
+docker-compose logs -f scheduler 
+Пересборка после изменений 
+docker-compose build 
+docker-compose up -d 
+ПРИМЕЧАНИЯ ПО БЕЗОПАСНОСТИ 
+1. Все токены и пароли в .env файле 
+2. .env добавлен в .gitignore 
+3. Используйте сложные пароли для админ-панели 
+4. Включите HTTPS для webhook 
+5. Ограничьте доступ к админ-панели по IP 
+6. Регулярно обновляйте зависимости 
+7. Используйте fail2ban для защиты от брутфорса 
+8. Настройте мониторинг и алерты 
+9. Резервное копирование БД ежедневно 
+10. Логирование всех действий администраторов 
+ССЫЛКИ 
+● aiogram 3.x: https://docs.aiogram.dev/ 
+● FastAPI: https://fastapi.tiangolo.com/ 
+● SQLAlchemy: https://docs.sqlalchemy.org/ 
+● Marzban: https://github.com/Gozargah/Marzban 
+● ЮKassa: https://yookassa.ru/developers 
+● CryptoBot: https://help.crypt.bot/ 
+● CloudPayments: https://developers.cloudpayments.ru/ 
+● Docker: https://docs.docker.com/ 
+● PostgreSQL: https://www.postgresql.org/docs/ 
+● Redis: https://redis.io/documentation 

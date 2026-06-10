@@ -1,0 +1,979 @@
+ПОШАГОВЫЙ ГАЙД ПО РАЗРАБОТКЕ 
+VPN Telegram Bot 
+Дата: 10.06.2026 
+ЭТАП 1: ПОДГОТОВКА ИНФРАСТРУКТУРЫ (День 1-2) 
+1.1 Аренда сервера 
+Рекомендуемые провайдеры: 
+● Aeza (Нидерланды, Германия) — от €5/мес 
+● PQ.Hosting (Нидерланды, Финляндия) — от $4/мес 
+● VDSina (Нидерланды) — от 350₽/мес 
+Минимальные требования: 
+● CPU: 2 ядра 
+● RAM: 4 GB 
+● SSD: 40 GB 
+● Трафик: безлимит 
+● Локация: Нидерланды, Германия, Финляндия 
+1.2 Установка базового ПО 
+Подключение к серверу 
+ssh root@YOUR_SERVER_IP 
+Обновление системы (Ubuntu 22.04) 
+apt update && apt upgrade -y 
+Установка необходимых пакетов 
+apt install -y curl wget git nano htop docker.io docker-compose 
+Запуск Docker 
+systemctl start docker 
+systemctl enable docker 
+Проверка 
+docker --version 
+docker-compose --version 
+1.3 Настройка домена и Cloudflare 
+1. Купить домен (например, на reg.ru или Namecheap) 
+2. Добавить домен в Cloudflare 
+3. Создать A-запись: vpn-bot.yourdomain.com → IP сервера 
+4. Включить проксирование (оранжевое облако) 
+5. Вкладка SSL/TLS → Full (strict) 
+1.4 Установка Marzban (панель управления VPN) 
+Создаём директорию 
+mkdir -p /opt/marzban && cd /opt/marzban 
+Скачиваем docker-compose.yml 
+curl -L https://github.com/Gozargah/Marzban/raw/master/docker-compose.yml -o 
+docker-compose.yml 
+Создаём .env файл 
+cat > .env << 'EOF' 
+UVICORN_HOST=0.0.0.0 
+UVICORN_PORT=8000 
+DASHBOARD_PATH=/dashboard 
+XRAY_JSON=/xray.json 
+XRAY_EXECUTABLE_PATH=/usr/local/bin/xray 
+XRAY_ASSETS_PATH=/usr/local/share/xray 
+SSL_CERT_FILE=/path/to/certificate.crt 
+SSL_KEY_FILE=/path/to/private.key 
+EOF 
+Запуск 
+docker-compose up -d 
+Проверка логов 
+docker-compose logs -f 
+Доступ к панели: 
+https://vpn-bot.yourdomain.com:8000/da
+shboard 
+Логин/пароль по умолчанию: admin / 
+admin 
+1.5 Создание Telegram бота 
+1. Открыть @BotFather в Telegram 
+2. Отправить /newbot 
+3. Ввести имя бота (например, "VPN Service") 
+4. Ввести username бота (например, "your_vpn_bot") 
+5. Сохранить полученный токен (например, 123456789:ABCdefGHIjklMNOpqrsTUVwxyz) 
+1.6 Установка PostgreSQL и Redis 
+Создаём docker-compose для 
+инфраструктуры 
+mkdir -p /opt/vpn-bot && cd /opt/vpn-bot 
+cat > docker-compose.yml << 'EOF' 
+version: '3.8' 
+services: 
+postgres: 
+image: postgres:15-alpine 
+container_name: vpn-bot-postgres 
+restart: always 
+environment: 
+POSTGRES_USER: vpn_bot 
+POSTGRES_PASSWORD: YOUR_STRONG_PASSWORD 
+POSTGRES_DB: vpn_bot_db 
+volumes: - postgres_data:/var/lib/postgresql/data 
+ports: - "127.0.0.1:5432:5432" 
+redis: 
+image: redis:7-alpine 
+container_name: vpn-bot-redis 
+restart: always 
+volumes: - redis_data:/data 
+ports: - "127.0.0.1:6379:6379" 
+volumes: 
+postgres_data: 
+redis_data: 
+EOF 
+docker-compose up -d 
+Проверка 
+docker-compose ps 
+ЭТАП 2: СТРУКТУРА ПРОЕКТА (День 3) 
+2.1 Инициализация проекта 
+mkdir -p /opt/vpn-bot/app && cd /opt/vpn-bot/app 
+git init 
+Создаём структуру директорий 
+mkdir -p 
+app/{bot/{handlers,keyboards,states,middlewares,services},admin/{routes,templates,static},core
+,models,schemas,services/payments,utils} 
+mkdir -p tests alembic/versions 
+Создаём файлы 
+touch app/init.py 
+touch app/bot/init.py 
+touch app/bot/handlers/init.py 
+touch app/bot/keyboards/init.py 
+touch app/bot/states/init.py 
+touch app/bot/middlewares/init.py 
+touch app/bot/services/init.py 
+touch app/admin/init.py 
+touch app/admin/routes/init.py 
+touch app/models/init.py 
+touch app/schemas/init.py 
+touch app/services/init.py 
+touch app/services/payments/init.py 
+touch app/utils/init.py 
+2.2 Файл requirements.txt 
+cat > requirements.txt << 'EOF' 
+Web Framework & Bot 
+aiogram==3.4.1 
+fastapi==0.109.0 
+uvicorn[standard]==0.27.0 
+Database 
+sqlalchemy[asyncio]==2.0.25 
+asyncpg==0.29.0 
+alembic==1.13.1 
+Cache & Queue 
+redis==5.0.1 
+aioredis==2.0.1 
+Scheduling 
+apscheduler==3.10.4 
+Payments 
+yookassa==2.4.1 
+cloudpayments==1.0.0 
+Utils 
+pydantic==2.5.3 
+pydantic-settings==2.1.0 
+python-dotenv==1.0.0 
+qrcode==7.4.2 
+pillow==10.2.0 
+httpx==0.26.0 
+aiohttp==3.9.1 
+Admin Panel 
+jinja2==3.1.3 
+python-multipart==0.0.6 
+Monitoring (опционально) 
+prometheus-client==0.19.0 
+EOF 
+2.3 Dockerfile 
+cat > Dockerfile << 'EOF' 
+FROM python:3.11-slim 
+WORKDIR /app 
+RUN apt-get update && apt-get install -y --no-install-recommends 
+gcc 
+libpq-dev 
+&& rm -rf /var/lib/apt/lists/* 
+COPY requirements.txt . 
+RUN pip install --no-cache-dir -r requirements.txt 
+COPY . . 
+CMD ["python", "-m", "app.main"] 
+EOF 
+2.4 Docker Compose для бота 
+Добавляем в существующий 
+docker-compose.yml 
+cat >> docker-compose.yml << 'EOF' 
+bot: 
+build: ./app 
+container_name: vpn-bot-app 
+restart: always 
+env_file: - .env 
+depends_on: - postgres - redis 
+volumes: - ./app:/app 
+command: python -m app.main 
+admin: 
+build: ./app 
+container_name: vpn-bot-admin 
+restart: always 
+env_file: - .env 
+depends_on: - postgres - redis 
+ports: - "127.0.0.1:8000:8000" 
+command: uvicorn app.main:admin_app --host 0.0.0.0 --port 8000 
+EOF 
+ЭТАП 3: КОНФИГУРАЦИЯ И БАЗОВЫЙ КОД (День 4-5) 
+3.1 Файл .env 
+cat > .env << 'EOF' 
+Telegram 
+BOT_TOKEN=123456789:YOUR_BOT_TOKEN_HERE 
+ADMIN_IDS=123456789,987654321 
+Database 
+DATABASE_URL=postgresql+asyncpg://vpn_bot:YOUR_STRONG_PASSWORD@postgres:54
+32/vpn_bot_db 
+Redis 
+REDIS_URL=redis://redis:6379/0 
+Marzban 
+MARZBAN_URL=https://vpn-bot.yourdomain.com:8000 
+MARZBAN_USERNAME=admin 
+MARZBAN_PASSWORD=admin 
+MARZBAN_INSECURE=true # true если self-signed сертификат 
+Payments 
+YOOKASSA_SHOP_ID=your_shop_id 
+YOOKASSA_SECRET_KEY=your_secret_key 
+YOOKASSA_CALLBACK_URL=https://vpn-bot.yourdomain.com/webhook/yookassa 
+CLOUDPAYMENTS_PUBLIC_ID=your_public_id 
+CLOUDPAYMENTS_API_SECRET=your_api_secret 
+CLOUDPAYMENTS_CALLBACK_URL=https://vpn-bot.yourdomain.com/webhook/cloudpayment
+s 
+CRYPTOBOT_TOKEN=your_cryptobot_token 
+CRYPTOBOT_CALLBACK_URL=https://vpn-bot.yourdomain.com/webhook/cryptobot 
+Admin Panel 
+ADMIN_PANEL_URL=/admin 
+ADMIN_USERNAME=admin 
+ADMIN_PASSWORD=strong_password 
+App 
+DEBUG=false 
+LOG_LEVEL=INFO 
+EOF 
+3.2 Конфигурация (app/core/config.py) 
+from pydantic_settings import BaseSettings 
+from typing import List 
+class Settings(BaseSettings): 
+BOT_TOKEN: str 
+ADMIN_IDS: List[int] 
+DATABASE_URL: str 
+REDIS_URL: str 
+MARZBAN_URL: str 
+MARZBAN_USERNAME: str 
+MARZBAN_PASSWORD: str 
+MARZBAN_INSECURE: bool = False 
+YOOKASSA_SHOP_ID: str 
+YOOKASSA_SECRET_KEY: str 
+YOOKASSA_CALLBACK_URL: str 
+CLOUDPAYMENTS_PUBLIC_ID: str 
+CLOUDPAYMENTS_API_SECRET: str 
+CLOUDPAYMENTS_CALLBACK_URL: str 
+CRYPTOBOT_TOKEN: str 
+CRYPTOBOT_CALLBACK_URL: str 
+ADMIN_USERNAME: str 
+ADMIN_PASSWORD: str 
+DEBUG: bool = False 
+LOG_LEVEL: str = "INFO" 
+class Config: 
+env_file = ".env" 
+settings = Settings() 
+3.3 Подключение к БД (app/core/database.py) 
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker 
+from sqlalchemy.orm import declarative_base 
+from app.core.config import settings 
+engine = create_async_engine(settings.DATABASE_URL, echo=settings.DEBUG) 
+async_session = async_sessionmaker(engine, class_=AsyncSession, 
+expire_on_commit=False) 
+Base = declarative_base() 
+async def get_db(): 
+async with async_session() as session: 
+yield session 
+3.4 Модели SQLAlchemy (app/models/) 
+app/models/user.py 
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, BigInteger, ForeignKey, 
+Text 
+from sqlalchemy.orm import relationship 
+from sqlalchemy.sql import func 
+from app.core.database import Base 
+class User(Base): 
+tablename = "users" 
+id = Column(Integer, primary_key=True, index=True) 
+telegram_id = Column(BigInteger, unique=True, index=True) 
+username = Column(String(255), nullable=True) 
+first_name = Column(String(255), nullable=True) 
+last_name = Column(String(255), nullable=True) 
+referral_code = Column(String(50), unique=True, index=True) 
+referred_by = Column(Integer, ForeignKey("users.id"), nullable=True) 
+created_at = Column(DateTime(timezone=True), server_default=func.now()) 
+updated_at = Column(DateTime(timezone=True), onupdate=func.now()) 
+is_banned = Column(Boolean, default=False) 
+is_admin = Column(Boolean, default=False) 
+subscriptions = relationship("Subscription", back_populates="user") 
+payments = relationship("Payment", back_populates="user") 
+app/models/subscription.py 
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Enum 
+from sqlalchemy.orm import relationship 
+from sqlalchemy.sql import func 
+import enum 
+from app.core.database import Base 
+class SubscriptionStatus(str, enum.Enum): 
+ACTIVE = "active" 
+EXPIRED = "expired" 
+CANCELLED = "cancelled" 
+class Subscription(Base): 
+tablename = "subscriptions" 
+id = Column(Integer, primary_key=True, index=True) 
+user_id = Column(Integer, ForeignKey("users.id")) 
+tariff_id = Column(Integer, ForeignKey("tariffs.id")) 
+server_id = Column(Integer, ForeignKey("servers.id")) 
+start_date = Column(DateTime(timezone=True)) 
+end_date = Column(DateTime(timezone=True)) 
+status = Column(String(50), default=SubscriptionStatus.ACTIVE) 
+marzban_username = Column(String(255), nullable=True) 
+created_at = Column(DateTime(timezone=True), server_default=func.now()) 
+user = relationship("User", back_populates="subscriptions") 
+tariff = relationship("Tariff") 
+server = relationship("Server") 
+app/models/payment.py 
+from sqlalchemy import Column, Integer, String, Numeric, DateTime, ForeignKey, Enum 
+from sqlalchemy.orm import relationship 
+from sqlalchemy.sql import func 
+import enum 
+from app.core.database import Base 
+class PaymentStatus(str, enum.Enum): 
+PENDING = "pending" 
+SUCCESS = "success" 
+FAILED = "failed" 
+REFUNDED = "refunded" 
+class PaymentProvider(str, enum.Enum): 
+YOOKASSA = "yookassa" 
+CLOUDPAYMENTS = "cloudpayments" 
+CRYPTOBOT = "cryptobot" 
+class Payment(Base): 
+tablename = "payments" 
+id = Column(Integer, primary_key=True, index=True) 
+user_id = Column(Integer, ForeignKey("users.id")) 
+subscription_id = Column(Integer, ForeignKey("subscriptions.id"), nullable=True) 
+amount = Column(Numeric(10, 2)) 
+currency = Column(String(10), default="RUB") 
+provider = Column(String(50)) 
+provider_payment_id = Column(String(255), unique=True) 
+status = Column(String(50), default=PaymentStatus.PENDING) 
+created_at = Column(DateTime(timezone=True), server_default=func.now()) 
+paid_at = Column(DateTime(timezone=True), nullable=True) 
+user = relationship("User", back_populates="payments") 
+app/models/tariff.py 
+from sqlalchemy import Column, Integer, String, Numeric, Boolean, DateTime 
+from sqlalchemy.sql import func 
+from app.core.database import Base 
+class Tariff(Base): 
+tablename = "tariffs" 
+id = Column(Integer, primary_key=True, index=True) 
+name = Column(String(255)) 
+duration_months = Column(Integer) 
+price = Column(Numeric(10, 2)) 
+discount_percent = Column(Integer, default=0) 
+is_active = Column(Boolean, default=True) 
+created_at = Column(DateTime(timezone=True), server_default=func.now()) 
+app/models/server.py 
+from sqlalchemy import Column, Integer, String, Boolean, DateTime 
+from sqlalchemy.sql import func 
+from app.core.database import Base 
+class Server(Base): 
+tablename = "servers" 
+id = Column(Integer, primary_key=True, index=True) 
+name = Column(String(255)) 
+host = Column(String(255)) 
+marzban_node_id = Column(String(255), nullable=True) 
+max_users = Column(Integer, default=100) 
+current_users = Column(Integer, default=0) 
+is_active = Column(Boolean, default=True) 
+location = Column(String(255)) 
+created_at = Column(DateTime(timezone=True), server_default=func.now()) 
+3.5 Миграции Alembic 
+Инициализация 
+alembic init alembic 
+Настройка alembic.ini (редактируем 
+sqlalchemy.url) 
+sqlalchemy.url = 
+postgresql+asyncpg://vpn_bot:YOUR_S
+TRONG_PASSWORD@localhost:5432/vp
+n_bot_db 
+Создание миграции 
+alembic revision --autogenerate -m "initial" 
+Применение 
+alembic upgrade head 
+ЭТАП 4: TELEGRAM БОТ (День 6-8) 
+4.1 Точка входа (app/main.py) 
+import asyncio 
+import logging 
+from aiogram import Bot, Dispatcher 
+from aiogram.enums import ParseMode 
+from app.core.config import settings 
+from app.bot.handlers import start, payments, profile, referral, gift 
+from app.bot.middlewares import logging_middleware, ban_middleware 
+logging.basicConfig(level=logging.INFO) 
+bot = Bot(token=settings.BOT_TOKEN, parse_mode=ParseMode.HTML) 
+dp = Dispatcher() 
+Регистрация middleware 
+dp.message.middleware(logging_middleware.LoggingMiddleware()) 
+dp.message.middleware(ban_middleware.BanMiddleware()) 
+Регистрация роутеров 
+dp.include_router(start.router) 
+dp.include_router(payments.router) 
+dp.include_router(profile.router) 
+dp.include_router(referral.router) 
+dp.include_router(gift.router) 
+async def main(): 
+await dp.start_polling(bot) 
+if name == "main": 
+asyncio.run(main()) 
+4.2 Обработчик старта (app/bot/handlers/start.py) 
+from aiogram import Router, F 
+from aiogram.types import Message, CallbackQuery 
+from aiogram.filters import CommandStart, Command 
+from aiogram.fsm.context import FSMContext 
+from app.bot.keyboards import main_menu 
+from app.services.user_service import UserService 
+router = Router() 
+@router.message(CommandStart()) 
+async def cmd_start(message: Message, state: FSMContext): 
+# Извлекаем реферальный код если есть 
+args = message.text.split()[1:] if len(message.text.split()) > 1 else [] 
+referral_code = args[0] if args else None 
+# Создаём или обновляем пользователя 
+user_service = UserService() 
+user = await user_service.get_or_create_user( 
+telegram_id=message.from_user.id, 
+username=message.from_user.username, 
+first_name=message.from_user.first_name, 
+last_name=message.from_user.last_name, 
+referral_code=referral_code 
+) 
+await message.answer( 
+f"Привет, {message.from_user.first_name}! 
+ 
+ 
+\n\n" 
+f"Добро пожаловать в VPN сервис. Выберите действие:", 
+reply_markup=main_menu.get_main_menu() 
+) 
+@router.message(F.text == "Меню") 
+async def show_menu(message: Message): 
+await message.answer( 
+"Главное меню:", 
+reply_markup=main_menu.get_main_menu() 
+) 
+4.3 Главное меню (app/bot/keyboards/main_menu.py) 
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton 
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton 
+ 
+def get_main_menu() -> ReplyKeyboardMarkup: 
+keyboard = [ 
+[KeyboardButton(text="Купить подписку")], 
+[KeyboardButton(text="Мой профиль"), KeyboardButton(text="Подарить подписку")], 
+[KeyboardButton(text="Реферальная система"), KeyboardButton(text="Помощь")] 
+] 
+return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True) 
+ 
+def get_tariffs_menu() -> InlineKeyboardMarkup: 
+keyboard = [ 
+[InlineKeyboardButton(text="1 мес — 249₽", callback_data="tariff_1")], 
+[InlineKeyboardButton(text="3 мес — 669₽ (-10%)", callback_data="tariff_3")], 
+[InlineKeyboardButton(text="6 мес — 1199₽ (-20%)", callback_data="tariff_6")], 
+[InlineKeyboardButton(text="12 мес — 1899₽ (-37%)", callback_data="tariff_12")], 
+] 
+return InlineKeyboardMarkup(inline_keyboard=keyboard) 
+ 
+def get_payment_methods_menu(tariff_id: int) -> InlineKeyboardMarkup: 
+keyboard = [ 
+[InlineKeyboardButton(text="СБП", callback_data=f"pay_sbp_{tariff_id}")], 
+[InlineKeyboardButton(text="Банковская карта", callback_data=f"pay_card_{tariff_id}")], 
+[InlineKeyboardButton(text="Криптовалюта", callback_data=f"pay_crypto_{tariff_id}")], 
+] 
+return InlineKeyboardMarkup(inline_keyboard=keyboard) 
+ 
+4.4 Сервис пользователей (app/services/user_service.py) 
+ 
+import secrets 
+import string 
+from sqlalchemy import select 
+from app.core.database import async_session 
+from app.models.user import User 
+ 
+class UserService: 
+async def get_or_create_user(self, telegram_id: int, username: str = None, 
+first_name: str = None, last_name: str = None, 
+referral_code: str = None): 
+async with async_session() as session: 
+result = await session.execute( 
+select(User).where(User.telegram_id == telegram_id) 
+) 
+user = result.scalar_one_or_none() 
+        if user: 
+            # Обновляем данные 
+            user.username = username 
+            user.first_name = first_name 
+            user.last_name = last_name 
+            await session.commit() 
+            return user 
+         
+        # Создаём нового пользователя 
+        new_referral_code = self._generate_referral_code() 
+         
+        # Проверяем реферера 
+        referrer_id = None 
+        if referral_code: 
+            referrer_result = await session.execute( 
+                select(User).where(User.referral_code == referral_code) 
+            ) 
+            referrer = referrer_result.scalar_one_or_none() 
+            if referrer: 
+                referrer_id = referrer.id 
+         
+        user = User( 
+            telegram_id=telegram_id, 
+            username=username, 
+            first_name=first_name, 
+            last_name=last_name, 
+            referral_code=new_referral_code, 
+            referred_by=referrer_id 
+        ) 
+        session.add(user) 
+        await session.commit() 
+        await session.refresh(user) 
+        return user 
+ 
+def _generate_referral_code(self) -> str: 
+    alphabet = string.ascii_letters + string.digits 
+    return ''.join(secrets.choice(alphabet) for _ in range(8)) 
+ 
+ 
+ 
+ЭТАП 5: ИНТЕГРАЦИЯ С MARZBAN (День 9-10) 
+ 
+5.1 Сервис Marzban (app/services/marzban.py) 
+ 
+import httpx 
+from app.core.config import settings 
+ 
+class MarzbanService: 
+def init(self): 
+self.base_url = settings.MARZBAN_URL.rstrip('/') 
+self.username = settings.MARZBAN_USERNAME 
+self.password = settings.MARZBAN_PASSWORD 
+self.token = None 
+async def _get_token(self): 
+    if self.token: 
+        return self.token 
+     
+    async with httpx.AsyncClient(verify=not settings.MARZBAN_INSECURE) as client: 
+        response = await client.post( 
+            f"{self.base_url}/api/admin/token", 
+            data={"username": self.username, "password": self.password} 
+        ) 
+        response.raise_for_status() 
+        self.token = response.json()["access_token"] 
+        return self.token 
+ 
+async def create_user(self, username: str, expire_days: int = 30) -> dict: 
+    token = await self._get_token() 
+     
+    async with httpx.AsyncClient(verify=not settings.MARZBAN_INSECURE) as client: 
+        response = await client.post( 
+            f"{self.base_url}/api/user", 
+            headers={"Authorization": f"Bearer {token}"}, 
+            json={ 
+                "username": username, 
+                "expire": expire_days * 86400,  # секунды 
+                "data_limit": 0,  # безлимит 
+                "proxies": { 
+                    "vless": {}, 
+                    "vmess": {} 
+                }, 
+                "inbounds": { 
+                    "vless": ["VLESS Reality TCP"], 
+                    "vmess": ["VMess TCP"] 
+                } 
+            } 
+        ) 
+        response.raise_for_status() 
+        return response.json() 
+ 
+async def get_user_config(self, username: str) -> dict: 
+    token = await self._get_token() 
+     
+    async with httpx.AsyncClient(verify=not settings.MARZBAN_INSECURE) as client: 
+        response = await client.get( 
+            f"{self.base_url}/api/user/{username}", 
+            headers={"Authorization": f"Bearer {token}"} 
+        ) 
+        response.raise_for_status() 
+        return response.json() 
+ 
+async def disable_user(self, username: str): 
+    token = await self._get_token() 
+     
+    async with httpx.AsyncClient(verify=not settings.MARZBAN_INSECURE) as client: 
+        response = await client.put( 
+            f"{self.base_url}/api/user/{username}", 
+            headers={"Authorization": f"Bearer {token}"}, 
+            json={"status": "disabled"} 
+        ) 
+        response.raise_for_status() 
+        return response.json() 
+ 
+ 
+5.2 Генерация QR-кода (app/utils/qr_generator.py) 
+ 
+import qrcode 
+from io import BytesIO 
+from aiogram.types import BufferedInputFile 
+ 
+def generate_qr_code(data: str) -> BufferedInputFile: 
+qr = qrcode.QRCode(version=1, box_size=10, border=5) 
+qr.add_data(data) 
+qr.make(fit=True) 
+img = qr.make_image(fill_color="black", back_color="white") 
+buffer = BytesIO() 
+img.save(buffer, format='PNG') 
+buffer.seek(0) 
+ 
+return BufferedInputFile(buffer.read(), filename="qr_code.png") 
+ 
+ 
+ 
+ЭТАП 6: ПЛАТЕЖНЫЕ СИСТЕМЫ (День 11-13) 
+ 
+6.1 ЮKassa (app/services/payments/yookassa.py) 
+ 
+import httpx 
+from app.core.config import settings 
+from yookassa import Configuration, Payment 
+ 
+Configuration.configure( 
+account_id=settings.YOOKASSA_SHOP_ID, 
+secret_key=settings.YOOKASSA_SECRET_KEY 
+) 
+ 
+class YookassaService: 
+async def create_payment(self, amount: float, description: str, 
+return_url: str, metadata: dict) -> dict: 
+payment = Payment.create({ 
+"amount": { 
+"value": str(amount), 
+"currency": "RUB" 
+}, 
+"capture": True, 
+"confirmation": { 
+"type": "redirect", 
+"return_url": return_url 
+}, 
+"description": description, 
+"metadata": metadata 
+}) 
+return payment 
+async def process_webhook(self, payload: dict) -> bool: 
+    # Проверка подписи и обработка 
+    # Возвращает True если платёж успешен 
+    if payload.get("event") == "payment.succeeded": 
+        return True 
+    return False 
+ 
+ 
+6.2 CryptoBot (app/services/payments/cryptobot.py) 
+ 
+import httpx 
+from app.core.config import settings 
+ 
+class CryptoBotService: 
+def init(self): 
+self.token = settings.CRYPTOBOT_TOKEN 
+self.base_url = "https://pay.crypt.bot/api" 
+async def create_invoice(self, amount: float, description: str,  
+                         payload: str) -> dict: 
+    async with httpx.AsyncClient() as client: 
+        response = await client.post( 
+            f"{self.base_url}/createInvoice", 
+            headers={"Crypto-Pay-API-Token": self.token}, 
+            json={ 
+                "asset": "USDT", 
+                "amount": str(amount), 
+                "description": description, 
+                "payload": payload, 
+                "paid_btn_name": "callback", 
+                "paid_btn_url": "https://t.me/your_bot" 
+            } 
+        ) 
+        response.raise_for_status() 
+        return response.json()["result"] 
+6.3 Обработка платежей (app/bot/handlers/payments.py) 
+from aiogram import Router, F 
+from aiogram.types import CallbackQuery, Message 
+from aiogram.fsm.context import FSMContext 
+from app.bot.keyboards import main_menu 
+from app.services.payments.yookassa import YookassaService 
+from app.services.payments.cryptobot import CryptoBotService 
+from app.services.marzban import MarzbanService 
+from app.services.subscription_service import SubscriptionService 
+router = Router() 
+@router.callback_query(F.data.startswith("tariff_")) 
+async def process_tariff_selection(callback: CallbackQuery): 
+tariff_id = int(callback.data.split("_")[1]) 
+await callback.message.edit_text( 
+"Выберите способ оплаты:", 
+reply_markup=main_menu.get_payment_methods_menu(tariff_id) 
+) 
+@router.callback_query(F.data.startswith("pay_card_")) 
+async def process_card_payment(callback: CallbackQuery): 
+tariff_id = int(callback.data.split("_")[2]) 
+# Создаём платёж в ЮKassa 
+yookassa = YookassaService() 
+payment = await yookassa.create_payment( 
+amount=249.0,  # Получаем из тарифа 
+description=f"VPN подписка {tariff_id} мес", 
+return_url="https://t.me/your_bot", 
+metadata={"user_id": callback.from_user.id, "tariff_id": tariff_id} 
+) 
+await callback.message.edit_text( 
+f"Оплатите по ссылке:\n{payment.confirmation.confirmation_url}\n\n" 
+f"После оплаты подписка будет активирована автоматически." 
+) 
+ЭТАП 7: УВЕДОМЛЕНИЯ И ПЛАНИРОВЩИК (День 14-15) 
+7.1 Планировщик (app/services/scheduler.py) 
+from apscheduler.schedulers.asyncio import AsyncIOScheduler 
+from apscheduler.triggers.cron import CronTrigger 
+from app.services.notification_service import NotificationService 
+from app.services.subscription_service import SubscriptionService 
+scheduler = AsyncIOScheduler() 
+async def check_expiring_subscriptions(): 
+"""Проверка истекающих подписок""" 
+notification_service = NotificationService() 
+await notification_service.notify_expiring_subscriptions() 
+async def deactivate_expired_subscriptions(): 
+"""Деактивация истёкших подписок""" 
+subscription_service = SubscriptionService() 
+await subscription_service.deactivate_expired() 
+async def backup_database(): 
+"""Резервное копирование БД""" 
+# pg_dump через subprocess или библиотеку 
+pass 
+def setup_scheduler(): 
+scheduler.add_job( 
+check_expiring_subscriptions, 
+CronTrigger(hour="*/6"), # Каждые 6 часов 
+id="check_expiring" 
+) 
+scheduler.add_job( 
+deactivate_expired_subscriptions, 
+CronTrigger(hour=0, minute=0), # Ежедневно в полночь 
+id="deactivate_expired" 
+) 
+scheduler.add_job( 
+backup_database, 
+CronTrigger(hour=3, minute=0), # Ежедневно в 3:00 
+id="backup_db" 
+) 
+scheduler.start() 
+7.2 Сервис уведомлений (app/services/notification_service.py) 
+from datetime import datetime, timedelta 
+from sqlalchemy import select, and_ 
+from app.core.database import async_session 
+from app.models.subscription import Subscription 
+from app.models.user import User 
+from app.bot.main import bot 
+class NotificationService: 
+async def notify_expiring_subscriptions(self): 
+async with async_session() as session: 
+now = datetime.utcnow() 
+        # Уведомление за 7 дней 
+        seven_days = now + timedelta(days=7) 
+        result = await session.execute( 
+            select(Subscription, User).join(User).where( 
+                and_( 
+                    Subscription.end_date <= seven_days, 
+                    Subscription.end_date > now, 
+                    Subscription.status == "active" 
+                ) 
+            ) 
+        ) 
+         
+        for sub, user in result: 
+            days_left = (sub.end_date - now).days 
+             
+            if days_left == 7: 
+                await bot.send_message( 
+                    user.telegram_id, 
+                    "
+⚠
+ Ваша подписка заканчивается через 7 дней!\n\n" 
+                    "Продлите сейчас, чтобы не потерять доступ." 
+                ) 
+            elif days_left == 3: 
+                await bot.send_message( 
+                    user.telegram_id, 
+                    "
+⏳
+ Осталось 3 дня до окончания подписки!\n\n" 
+                    "Не забудьте продлить." 
+                ) 
+            elif days_left == 1: 
+                await bot.send_message( 
+                    user.telegram_id, 
+                    "
+🚨
+ Завтра отключение!\n\n" 
+                    "Срочно продлите подписку." 
+                ) 
+ 
+ 
+ 
+ЭТАП 8: АДМИН-ПАНЕЛЬ (День 16-17) 
+ 
+8.1 FastAPI приложение (app/admin/app.py) 
+ 
+from fastapi import FastAPI, Depends, HTTPException, Request 
+from fastapi.templating import Jinja2Templates 
+from fastapi.staticfiles import StaticFiles 
+from fastapi.security import HTTPBasic, HTTPBasicCredentials 
+from sqlalchemy import select, func 
+from app.core.database import async_session 
+from app.models.user import User 
+from app.models.payment import Payment 
+from app.models.subscription import Subscription 
+from app.core.config import settings 
+import secrets 
+admin_app = FastAPI(title="VPN Bot Admin") 
+admin_app.mount("/static", StaticFiles(directory="app/admin/static"), name="static") 
+templates = Jinja2Templates(directory="app/admin/templates") 
+security = HTTPBasic() 
+def verify_admin(credentials: HTTPBasicCredentials = Depends(security)): 
+is_correct_username = secrets.compare_digest(credentials.username, 
+settings.ADMIN_USERNAME) 
+is_correct_password = secrets.compare_digest(credentials.password, 
+settings.ADMIN_PASSWORD) 
+if not (is_correct_username and is_correct_password): 
+raise HTTPException(status_code=401, detail="Unauthorized") 
+return credentials.username 
+@admin_app.get("/") 
+async def dashboard(request: Request, admin: str = Depends(verify_admin)): 
+async with async_session() as session: 
+# Статистика 
+total_users = await session.execute(select(func.count(User.id))) 
+total_payments = await session.execute(select(func.sum(Payment.amount))) 
+active_subs = await session.execute( 
+select(func.count(Subscription.id)).where(Subscription.status == "active") 
+) 
+return templates.TemplateResponse("dashboard.html", { 
+"request": request, 
+"total_users": total_users.scalar(), 
+"total_revenue": total_payments.scalar() or 0, 
+"active_subscriptions": active_subs.scalar() 
+}) 
+@admin_app.get("/users") 
+async def users_list(request: Request, admin: str = Depends(verify_admin)): 
+async with async_session() as session: 
+result = await session.execute(select(User).order_by(User.created_at.desc())) 
+users = result.scalars().all() 
+return templates.TemplateResponse("users.html", { 
+"request": request, 
+"users": users 
+}) 
+ 
+ 
+ЭТАП 9: ДЕПЛОЙ И ЗАПУСК (День 18) 
+ 
+9.1 Nginx конфигурация 
+ 
+server { 
+listen 80; 
+server_name vpn-bot.yourdomain.com; 
+return 301 https://$server_name$request_uri; 
+} 
+ 
+server { 
+listen 443 ssl http2; 
+server_name vpn-bot.yourdomain.com; 
+ 
+ssl_certificate /path/to/certificate.crt; 
+ssl_certificate_key /path/to/private.key; 
+ 
+ 
+# Webhook для Telegram 
+location /webhook/ { 
+    proxy_pass http://127.0.0.1:8000; 
+    proxy_set_header Host $host; 
+    proxy_set_header X-Real-IP $remote_addr; 
+} 
+ 
+ 
+# Admin Panel 
+location /admin/ { 
+    proxy_pass http://127.0.0.1:8000; 
+    proxy_set_header Host $host; 
+    proxy_set_header X-Real-IP $remote_addr; 
+    auth_basic "Admin Panel"; 
+    auth_basic_user_file /etc/nginx/.htpasswd; 
+} 
+ 
+} 
+ 
+9.2 Запуск всей системы 
+ 
+Переходим в директорию 
+cd /opt/vpn-bot 
+Запуск инфраструктуры 
+docker-compose up -d postgres redis 
+Запуск Marzban 
+cd /opt/marzban && docker-compose up -d 
+Запуск бота и админки 
+cd /opt/vpn-bot 
+docker-compose up -d bot admin 
+Проверка статуса 
+docker-compose ps 
+docker-compose logs -f bot 
+9.3 Настройка webhook для Telegram 
+Отправляем запрос к Telegram API 
+curl -X POST 
+https://api.telegram.org/bot/setWebhook -H 'Content-Type: application/json' -d '{ 
+"url": "https://vpn-bot.yourdomain.com/webhook/telegram", 
+"max_connections": 40 
+}' 
+ЭТАП 10: МОНИТОРИНГ И БЭКАПЫ 
+10.1 Мониторинг 
+Установка Prometheus + Grafana 
+(опционально) 
+docker run -d --name prometheus -p 9090:9090 prom/prometheus 
+docker run -d --name grafana -p 3000:3000 grafana/grafana 
+Метрики для отслеживания: 
+● Количество активных пользователей 
+● Выручка за день/месяц 
+● Нагрузка на серверы 
+● Ошибки API 
+● Время ответа бота 
+10.2 Резервное копирование 
+Скрипт бэкапа (backup.sh) 
+#!/bin/bash 
+DATE=$(date +%Y%m%d_%H%M%S) 
+BACKUP_DIR="/backups" 
+Бэкап PostgreSQL 
+docker exec vpn-bot-postgres pg_dump -U vpn_bot vpn_bot_db > 
+$BACKUP_DIR/db_$DATE.sql 
+Бэкап конфигов Marzban 
+tar -czf $BACKUP_DIR/marzban_$DATE.tar.gz /opt/marzban 
+Отправка в Telegram канал 
+curl -X POST 
+"https://api.telegram.org/bot/sendDocument" -F "chat_id=" 
+-F "document=@$BACKUP_DIR/db_$DATE.sql" 
+Удаление старых бэкапов (старше 7 
+дней) 
+find $BACKUP_DIR -name ".sql" -mtime +7 -delete 
+find $BACKUP_DIR -name ".tar.gz" -mtime +7 -delete 
+Добавляем в crontab 
+0 3 * * * /opt/vpn-bot/backup.sh 
+ПРИЛОЖЕНИЕ: ПОЛЕЗНЫЕ КОМАНДЫ 
+Просмотр логов бота 
+docker-compose logs -f bot 
+Перезапуск бота 
+docker-compose restart bot 
+Вход в контейнер БД 
+docker exec -it vpn-bot-postgres psql -U vpn_bot vpn_bot_db 
+Вход в Redis 
+docker exec -it vpn-bot-redis redis-cli 
+Обновление кода и перезапуск 
+git pull 
+docker-compose build bot 
+docker-compose up -d bot 
+Проверка статуса Marzban 
+docker -H unix:///var/run/docker.sock ps 
+Ручное создание пользователя в 
+Marzban 
+curl -X POST "https://vpn-bot.yourdomain.com:8000/api/user" -H "Authorization: Bearer " -H "Content-Type: application/json" -d '{ 
+"username": "test_user", 
+"expire": 2592000, 
+"data_limit": 0, 
+"proxies": {"vless": {}} 
+}' 
+ССЫЛКИ И РЕСУРСЫ 
+● Marzban: https://github.com/Gozargah/Marzban 
+● aiogram: https://docs.aiogram.dev/ 
+● FastAPI: https://fastapi.tiangolo.com/ 
+● SQLAlchemy: https://docs.sqlalchemy.org/ 
+● ЮKassa API: https://yookassa.ru/developers/api 
+● CryptoBot API: https://help.crypt.bot/crypto-pay-api 
+● CloudPayments API: https://developers.cloudpayments.ru/ 
+ПРИМЕЧАНИЯ 
+1. Все пароли и токены должны быть в .env файле, никогда не коммитить в git 
+2. Использовать strong password для админ-панели 
+3. Включить 2FA где возможно 
+4. Регулярно обновлять зависимости 
+5. Мониторить логи на ошибки 
+6. Тестировать платежи в тестовом режиме перед запуском 
