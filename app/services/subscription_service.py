@@ -43,10 +43,11 @@ class SubscriptionService:
             await session.commit()
             await session.refresh(subscription)
 
-            # Increment server user count
+            # БАГ 3: FOR UPDATE — блокировка строки для безопасного обновления счётчика
             await session.execute(
                 update(Server)
                 .where(Server.id == server_id)
+                .with_for_update()
                 .values(current_users=Server.current_users + 1)
             )
             await session.commit()
@@ -73,7 +74,7 @@ class SubscriptionService:
         async with async_session() as session:
             result = await session.execute(
                 select(Subscription)
-                # Баг 6: eager load — не будет N+1 при обращении к .tariff/.server
+                # БАГ 6: eager load — не будет N+1 при обращении к .tariff/.server
                 .options(
                     selectinload(Subscription.tariff),
                     selectinload(Subscription.server),
@@ -106,7 +107,10 @@ class SubscriptionService:
             target_date = datetime.now(timezone.utc) + timedelta(days=days)
             result = await session.execute(
                 select(Subscription)
-                .options(selectinload(Subscription.user))
+                .options(
+                    selectinload(Subscription.user),
+                    selectinload(Subscription.tariff),
+                )
                 .where(
                     and_(
                         Subscription.status == SubscriptionStatus.ACTIVE,
@@ -141,6 +145,14 @@ class SubscriptionService:
                             f"Failed to disable Marzban user {sub.marzban_username}",
                             exc_info=True,
                         )
+
+                # БАГ 4: уменьшить счётчик сервера при деактивации
+                await session.execute(
+                    update(Server)
+                    .where(Server.id == sub.server_id)
+                    .with_for_update()
+                    .values(current_users=Server.current_users - 1)
+                )
 
             await session.commit()
             logger.info(f"Deactivated {len(expired)} expired subscriptions")

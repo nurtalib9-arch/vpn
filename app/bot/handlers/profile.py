@@ -1,10 +1,15 @@
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
+from sqlalchemy.orm import selectinload
+from sqlalchemy import select
+from app.core.database import async_session
 from app.bot.keyboards.main_menu import get_profile_menu
 from app.services.user_service import UserService
 from app.services.subscription_service import SubscriptionService
-from app.services.marzban_service import MarzbanService
+from app.core.marzban import get_marzban
 from app.utils.qr_generator import generate_qr_code
+from app.models.user import User
+from app.models.referral import Referral
 from datetime import datetime, timezone
 import logging
 
@@ -40,8 +45,16 @@ async def show_profile(message: Message):
         status_text = "❌ <b>Нет активной подписки</b>"
         has_sub = False
 
-    referrals_count = len(user.referrals_made)
-    bonus_days = sum(r.bonus_days_given for r in user.referrals_made)
+    # БАГ 11: явно загружаем рефералы с ограничением
+    async with async_session() as session:
+        result = await session.execute(
+            select(Referral)
+            .where(Referral.referrer_id == user.id)
+        )
+        referrals = result.scalars().all()
+
+    referrals_count = len(referrals)
+    bonus_days = sum(r.bonus_days_given for r in referrals)
 
     await message.answer(
         f"👤 <b>Профиль</b>\n\n"
@@ -71,7 +84,8 @@ async def get_vpn_key(callback: CallbackQuery):
         await callback.answer("❌ Нет активной подписки.", show_alert=True)
         return
 
-    marzban = MarzbanService()
+    # БАГ 6: используем singleton Marzban
+    marzban = await get_marzban()
     try:
         links = await marzban.get_user_links(active_sub.marzban_username)
         if links:
@@ -111,7 +125,8 @@ async def get_qr_code(callback: CallbackQuery):
         await callback.answer("❌ Нет активной подписки.", show_alert=True)
         return
 
-    marzban = MarzbanService()
+    # БАГ 6: используем singleton Marzban
+    marzban = await get_marzban()
     try:
         links = await marzban.get_user_links(active_sub.marzban_username)
         if links:
@@ -139,13 +154,23 @@ async def payment_history(callback: CallbackQuery):
         await callback.answer("❌ Пользователь не найден.", show_alert=True)
         return
 
-    payments = user.payments[-10:]  # last 10
+    # Явно загружаем платежи (избегаем N+1)
+    async with async_session() as session:
+        from app.models.payment import Payment
+        result = await session.execute(
+            select(Payment)
+            .where(Payment.user_id == user.id)
+            .order_by(Payment.created_at.desc())
+            .limit(10)
+        )
+        payments = result.scalars().all()
+
     if not payments:
         await callback.answer("📊 История платежей пуста.", show_alert=True)
         return
 
     history_text = "📊 <b>История платежей:</b>\n\n"
-    for p in reversed(payments):
+    for p in payments:
         status_emoji = "✅" if p.status == "success" else "⏳"
         date_str = p.created_at.strftime("%d.%m.%Y") if p.created_at else "—"
         history_text += (

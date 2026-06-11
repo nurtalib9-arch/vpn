@@ -19,11 +19,13 @@ class User(Base):
     is_banned = Column(Boolean, default=False)
     is_admin = Column(Boolean, default=False)
 
-    subscriptions = relationship("Subscription", back_populates="user", lazy="selectin")
-    payments = relationship("Payment", back_populates="user", lazy="selectin")
+    # Use "raise" to prevent accidental N+1 queries
+    # Explicitly use selectinload() where needed
+    subscriptions = relationship("Subscription", back_populates="user", lazy="raise")
+    payments = relationship("Payment", back_populates="user", lazy="raise")
     referrals_made = relationship(
         "Referral",
         foreign_keys="Referral.referrer_id",
         back_populates="referrer",
-        lazy="selectin",
+        lazy="raise",
     )

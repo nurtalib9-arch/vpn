@@ -1,5 +1,8 @@
 from pydantic_settings import BaseSettings
 from typing import List, Optional
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
@@ -33,9 +36,24 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     WEBHOOK_URL: Optional[str] = None
 
+    # Currency conversion (can be updated periodically)
+    USD_TO_RUB_RATE: float = 90.0
+
     class Config:
         env_file = ".env"
         case_sensitive = True
 
 
 settings = Settings()
+
+
+# Validate required environment variables on startup
+def validate_settings():
+    """Validate critical settings on application startup."""
+    required_fields = ["BOT_TOKEN", "DATABASE_URL", "REDIS_URL", "MARZBAN_URL"]
+    missing = [f for f in required_fields if not getattr(settings, f)]
+    
+    if missing:
+        raise ValueError(f"Missing required environment variables: {', '.join(missing)}")
+    
+    logger.info("Settings validation passed")

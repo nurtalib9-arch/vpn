@@ -1,9 +1,10 @@
 from aiogram import Router, F
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from app.bot.keyboards.main_menu import get_payment_methods_menu, get_tariffs_menu, TARIFF_PRICES
 from app.services.payment_service import PaymentService
 from app.services.user_service import UserService
+from app.core.config import settings
 from app.payments.yookassa import YooKassaPayment
 from app.payments.cryptobot import CryptoBotPayment
 from decimal import Decimal
@@ -73,7 +74,6 @@ async def process_card_payment(callback: CallbackQuery):
 
     if payment_data and payment_data.get("confirmation"):
         confirm_url = payment_data["confirmation"].get("confirmation_url", "")
-        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="💳 Оплатить", url=confirm_url)],
         ])
@@ -105,8 +105,9 @@ async def process_crypto_payment(callback: CallbackQuery):
     name, price_str = TARIFF_PRICES.get(tariff_id, ("?", "0"))
     amount_rub = float(price_str.replace(" ", "").replace(",", "."))
 
-    # Convert RUB to USDT (approximate, 1 USD ~ 90 RUB)
-    amount_usdt = round(amount_rub / 90, 2)
+    # БАГ 8: используем динамический курс из конфига (можно обновлять)
+    # Конвертируем RUB в USDT используя текущий курс из settings
+    amount_usdt = round(amount_rub / settings.USD_TO_RUB_RATE, 2)
 
     user_service = UserService()
     user = await user_service.get_user_by_telegram_id(callback.from_user.id)
@@ -131,7 +132,6 @@ async def process_crypto_payment(callback: CallbackQuery):
                 payload=payment.provider_payment_id,
             )
             pay_url = invoice.get("bot_invoice_url", "")
-            from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
             kb = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="₿ Оплатить криптовалютой", url=pay_url)],
             ])

@@ -6,8 +6,10 @@ from aiogram.enums import ParseMode
 from aiogram.fsm.storage.redis import RedisStorage
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 from aiohttp import web
-from app.core.config import settings
+from app.core.config import settings, validate_settings
 from app.core.redis import redis_client
+from app.core.telegram_bot import get_bot, close_bot
+from app.core.marzban import close_marzban
 from app.bot.handlers import start, payments, profile, referral, gift
 from app.bot.middlewares.logging_middleware import LoggingMiddleware
 from app.bot.middlewares.ban_middleware import BanMiddleware
@@ -38,10 +40,9 @@ async def on_startup(bot: Bot):
 
 async def on_shutdown(bot: Bot):
     logger.info("Shutting down...")
-    # Закрыть переиспользуемый Marzban HTTP-клиент
-    from app.services.marzban_service import MarzbanService
-    marzban = MarzbanService()
-    await marzban.close()
+    # БАГ 13: закрываем singleton сервисы правильно
+    await close_bot()
+    await close_marzban()
     await bot.session.close()
 
 
@@ -94,6 +95,13 @@ async def run_webhook():
 
 
 async def main():
+    # БАГ 9: валидировать конфиг на старте
+    try:
+        validate_settings()
+    except ValueError as e:
+        logger.error(f"Configuration error: {e}")
+        raise
+    
     if settings.WEBHOOK_URL:
         await run_webhook()
     else:

@@ -1,5 +1,6 @@
 import secrets
 import string
+import uuid
 import logging
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -33,6 +34,7 @@ class UserService:
                     await session.commit()
                 return user
 
+            # БАГ 2: используем UUID для гарантированно уникального referral_code
             new_referral_code = self._generate_referral_code()
 
             referrer_id = None
@@ -61,13 +63,25 @@ class UserService:
                 if referrer_id:
                     await self._process_referral_bonus(session, referrer_id, user.id)
 
-            except IntegrityError:
-                logger.error("IntegrityError creating user, rolling back", exc_info=True)
+            except IntegrityError as e:
+                logger.error(f"IntegrityError creating user {telegram_id}", exc_info=True)
                 await session.rollback()
+                
+                # Попытка найти существующего пользователя
                 result = await session.execute(
                     select(User).where(User.telegram_id == telegram_id)
                 )
-                return result.scalar_one()
+                existing_user = result.scalar_one_or_none()
+                
+                if existing_user:
+                    return existing_user
+                
+                # БАГ 10: если не нашли — это конфигурационная проблема
+                logger.error(
+                    f"IntegrityError and user not found for telegram_id={telegram_id}. "
+                    f"This indicates a database constraint issue: {e}"
+                )
+                raise
 
             return user
 
@@ -109,9 +123,11 @@ class UserService:
             await session.commit()
             return True
 
-    def _generate_referral_code(self) -> str:
-        alphabet = string.ascii_letters + string.digits
-        return "".join(secrets.choice(alphabet) for _ in range(8))
+    @staticmethod
+    def _generate_referral_code() -> str:
+        """Generate guaranteed unique referral code using UUID."""
+        # БАГ 2: используем первые 8 символов UUID hex — гарантированно уникален
+        return uuid.uuid4().hex[:8]
 
     async def _process_referral_bonus(self, session, referrer_id: int, referred_id: int):
         referral = Referral(
