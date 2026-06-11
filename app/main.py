@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import signal
 from aiogram import Bot, Dispatcher
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.redis import RedisStorage
