@@ -95,6 +95,15 @@ class PaymentService:
                 await session.commit()
                 return None
 
+            # БАГ 16: проверить, что tariff загружен
+            if not subscription.tariff:
+                logger.error(
+                    f"Tariff {tariff_id} not loaded for subscription {subscription.id}"
+                )
+                payment.status = "failed"
+                await session.commit()
+                return None
+
             marzban_username = f"user_{user.telegram_id}_{subscription.id}"
             expire_days = subscription.tariff.duration_months * 30
 
